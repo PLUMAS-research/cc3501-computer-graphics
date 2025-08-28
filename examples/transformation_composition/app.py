@@ -21,11 +21,7 @@ from grafica.utils import load_pipeline
 @click.option("--width", type=int, default=960)
 @click.option("--height", type=int, default=960)
 def compositions(width, height):
-    try:
-        config = pyglet.gl.Config(sample_buffers=1, samples=4)
-        window = pyglet.window.Window(width, height, config=config)
-    except pyglet.window.NoSuchConfigException:
-        window = pyglet.window.Window(width, height)
+    window = pyglet.window.Window(width, height)
 
     # elementos en nuestra escena
     # primero, el rectángulo que usaremos de fondo

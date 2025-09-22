@@ -25,6 +25,9 @@ grafica_cli.add_command(image_viewer)
 from examples.sr_jengibre import sr_jengibre
 grafica_cli.add_command(sr_jengibre)
 
+from examples.sr_jengibre_numpy import gingerbread_numpy
+grafica_cli.add_command(gingerbread_numpy)
+
 from examples.particles.app import particulas
 grafica_cli.add_command(particulas)
 

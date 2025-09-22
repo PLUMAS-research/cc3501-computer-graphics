@@ -7,12 +7,11 @@ from pathlib import Path
 import click
 
 @click.command("hello_world", short_help='¡Hola, mundo!')
-@click.option("--width", type=int, default=800)
-@click.option("--height", type=int, default=600)
-def hola_mundo(width, height):
+@click.option("--size", type=int, default=800)
+def hola_mundo(size):
     # esta es una ventana de pyglet. 
     # le damos la resolución como parámetro
-    win = pyglet.window.Window(width, width)
+    win = pyglet.window.Window(size, size)
 
     # Inicialización
     # dibujaremos un cuadrilátero. tiene cuatro vértices

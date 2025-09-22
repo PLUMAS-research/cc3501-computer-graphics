@@ -14,11 +14,7 @@ import grafica.transformations as tr
 @click.option("--width", type=int, default=960)
 @click.option("--height", type=int, default=960)
 def transformed_bunny(width, height):
-    try:
-        config = pyglet.gl.Config(sample_buffers=1, samples=4)
-        window = pyglet.window.Window(width, height, config=config)
-    except pyglet.window.NoSuchConfigException:
-        window = pyglet.window.Window(width, height)
+    window = pyglet.window.Window(width, height)
 
     bunny = tm.load("assets/Stanford_Bunny.stl")
 

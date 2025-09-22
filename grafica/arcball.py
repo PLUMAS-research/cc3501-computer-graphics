@@ -1,302 +1,404 @@
 """Clase Arcball para manipulación 3D de puntos de vista.
-Basado en https://github.com/mmatl/pyrender/blob/master/pyrender/trackball.py, de Matthew Matl
+Versión refactorizada con zoom logarítmico uniforme.
 """
 
 import numpy as np
-
 import grafica.transformations as tr
 
 
-class Arcball(object):
-    """Una clase para crear transformaciones de cámara a partir de movimientos del ratón."""
+class Arcball:
+    """Controlador de cámara 3D mediante mouse con zoom logarítmico uniforme."""
 
-    STATE_ROTATE = 0  # Estado para rotación
-    STATE_PAN = 1     # Estado para traslación/paneo
-    STATE_ROLL = 2    # Estado para roll (rotación sobre el eje Z)
-    STATE_ZOOM = 3    # Estado para zoom
+    STATE_ROTATE = 0
+    STATE_PAN = 1
+    STATE_ROLL = 2
+    STATE_ZOOM = 3
 
     def __init__(self, pose, size, scale, target=np.array([0.0, 0.0, 0.0])):
-        """Inicializa un arcball con una pose inicial cámara-a-mundo
-        y los parámetros dados.
+        """Inicializa el arcball.
 
         Parámetros
         ----------
-        pose : [4,4]
-            Una matriz de transformación inicial de cámara-a-mundo para el arcball.
-            Es la matriz inversa de la "vista" (world-to-camera).
-
-        size : (float, float)
-            El ancho y alto de la imagen de la cámara en píxeles.
-
+        pose : (4,4) array
+            Matriz de transformación inicial cámara-a-mundo (inversa de view).
+        size : (2,) tuple
+            Dimensiones de la ventana en píxeles (ancho, alto).
         scale : float
-            La diagonal de la caja contenedora de la escena --
-            usado para asegurar que los movimientos de traslación sean
-            suficientemente rápidos para escenas de diferentes tamaños.
-
-        target : (3,) float
-            El centro de la escena en coordenadas del mundo.
-            El arcball rotará alrededor de este punto.
+            Escala de la escena para ajustar velocidades de movimiento.
+        target : (3,) array
+            Centro de rotación en coordenadas del mundo.
+            IMPORTANTE: Este punto debe ser el centro del objeto que quieres rotar.
+            Si tu objeto no está en el origen, debes establecer target en la
+            posición del objeto para que las rotaciones sean alrededor del objeto.
         """
-        self._size = np.array(size)
+        self._size = np.array(size, dtype=np.float32)
         self._scale = float(scale)
-
-        self._pose = pose  # Matriz de pose anterior
-        self._n_pose = pose  # Matriz de pose actual/nueva
-
-        self._target = target  # Punto objetivo anterior
-        self._n_target = target  # Punto objetivo actual/nuevo
-
-        self._state = Arcball.STATE_ROTATE  # Estado inicial: rotación
+        
+        # Estados de transformación
+        self._pose = np.array(pose, dtype=np.float64)
+        self._target = np.array(target, dtype=np.float64)
+        
+        # Estado para drag & drop
+        self._drag_start = None
+        self._drag_pose = None
+        self._drag_target = None
+        
+        # Estado de interacción
+        self._state = Arcball.STATE_ROTATE
+        
+        # Configuración de zoom logarítmico
+        # Usamos log(distancia) para movimiento uniforme en toda la escala
+        self._zoom_speed = 0.1  # Velocidad de zoom (ajustable)
+        
+        # Para reset
+        self._initial_pose = np.copy(self._pose)
+        self._initial_target = np.copy(self._target)
+        
+        # Límites opcionales (por defecto sin límites prácticos)
+        self._min_distance = None
+        self._max_distance = None
 
     @property
     def pose(self):
-        """Devuelve la pose actual de cámara-a-mundo."""
-        return self._n_pose
+        """Obtiene la pose actual."""
+        return self._pose
+    
+    @pose.setter
+    def pose(self, value):
+        """Establece una nueva pose."""
+        self._pose = np.array(value, dtype=np.float64)
+
+    @property
+    def target(self):
+        """Obtiene el objetivo actual."""
+        return self._target
+    
+    @target.setter
+    def target(self, value):
+        """Establece un nuevo objetivo."""
+        self._target = np.array(value, dtype=np.float64)
 
     def set_state(self, state):
-        """Establece el estado del arcball para cambiar el efecto
-        de los movimientos de arrastre.
-
-        Parámetros
-        ----------
-        state : int
-            Uno de Arcball.STATE_ROTATE, Arcball.STATE_PAN,
-            Arcball.STATE_ROLL, y Arcball.STATE_ZOOM.
-        """
+        """Cambia el modo de interacción."""
         self._state = state
 
     def resize(self, size):
-        """Redimensiona la ventana.
+        """Actualiza las dimensiones de la ventana."""
+        self._size = np.array(size, dtype=np.float32)
 
-        Parámetros
-        ----------
-        size : (float, float)
-            El nuevo ancho y alto de la imagen de la cámara en píxeles.
+    def reset(self):
+        """Restaura el estado inicial."""
+        self._pose = np.copy(self._initial_pose)
+        self._target = np.copy(self._initial_target)
+
+    def set_initial_state(self, pose=None, target=None):
+        """Define un nuevo estado inicial para reset."""
+        if pose is not None:
+            self._initial_pose = np.copy(pose)
+        else:
+            self._initial_pose = np.copy(self._pose)
+        
+        if target is not None:
+            self._initial_target = np.copy(target)
+        else:
+            self._initial_target = np.copy(self._target)
+
+    def set_distance_limits(self, min_distance=None, max_distance=None):
+        """Establece límites opcionales de distancia.
+        
+        Si se dejan en None, no hay límites efectivos.
         """
-        self._size = np.array(size)
+        self._min_distance = min_distance
+        self._max_distance = max_distance
+
+    def get_camera_distance(self):
+        """Calcula la distancia actual al objetivo."""
+        eye = self._pose[:3, 3]
+        return np.linalg.norm(eye - self._target)
+
+    def set_camera_distance(self, distance):
+        """Establece una distancia específica al objetivo."""
+        eye = self._pose[:3, 3]
+        to_eye = eye - self._target
+        current_dist = np.linalg.norm(to_eye)
+        
+        if current_dist < 1e-10:
+            # Caso degenerado: usar eje Z de la cámara
+            direction = self._pose[:3, 2]
+        else:
+            direction = to_eye / current_dist
+        
+        # Aplicar límites si existen
+        if self._min_distance is not None:
+            distance = max(distance, self._min_distance)
+        if self._max_distance is not None:
+            distance = min(distance, self._max_distance)
+        
+        # Nueva posición
+        new_eye = self._target + direction * distance
+        self._pose[:3, 3] = new_eye
 
     def down(self, point):
-        """Registra una pulsación inicial del ratón en un punto determinado.
-
-        Parámetros
-        ----------
-        point : (2,) int
-            Las coordenadas x e y en píxeles de la pulsación del ratón.
-        """
-        # Guardamos el punto donde ocurrió el clic
-        self._pdown = np.array(point, dtype=np.float32)
-        # Guardamos la pose actual como referencia para el movimiento
-        self._pose = self._n_pose
-        # Guardamos el objetivo actual como referencia
-        self._target = self._n_target
+        """Inicia una operación de arrastre."""
+        self._drag_start = np.array(point, dtype=np.float32)
+        self._drag_pose = np.copy(self._pose)
+        self._drag_target = np.copy(self._target)
 
     def drag(self, point):
-        """Actualiza el arcball durante un arrastre.
-
-        Parámetros
-        ----------
-        point : (2,) int
-            Las coordenadas x e y actuales en píxeles del ratón durante un arrastre.
-            Esto calculará un movimiento para el arcball con el movimiento relativo
-            entre este punto y el marcado por down().
-        """
-        # Convertimos el punto a un array numpy
+        """Actualiza la transformación durante el arrastre."""
+        if self._drag_start is None:
+            return
+        
         point = np.array(point, dtype=np.float32)
-        # Calculamos el desplazamiento desde el punto inicial
-        dx, dy = point - self._pdown
-        # Calculamos una dimensión de referencia para normalizar el movimiento
-        mindim = 0.3 * np.min(self._size)
-
-        # Extraemos información de la pose actual
-        target = self._target  # Centro de rotación
-        x_axis = self._pose[:3, 0].flatten()  # Vector del eje X de la cámara
-        y_axis = self._pose[:3, 1].flatten()  # Vector del eje Y de la cámara
-        z_axis = self._pose[:3, 2].flatten()  # Vector del eje Z de la cámara
-        eye = self._pose[:3, 3].flatten()     # Posición de la cámara
-
-        # Interpretamos el arrastre como una rotación
+        delta = point - self._drag_start
+        
+        # Factor de escala para el movimiento
+        size_factor = 0.3 * min(self._size)
+        
         if self._state == Arcball.STATE_ROTATE:
-            # Calculamos ángulo de rotación en X basado en movimiento horizontal
-            x_angle = -dx / mindim
-
-            # Creamos matriz de rotación alrededor del eje Y (para movimiento horizontal)
-            # Primero trasladamos al centro de rotación, rotamos, y trasladamos de vuelta
-            x_rot_mat = (
-                tr.translate(*target) @ tr.rotationY(x_angle) @ tr.translate(*-target)
-            )
-            
-            # Calculamos ángulo de rotación en Y basado en movimiento vertical
-            y_angle = dy / mindim
-
-            # Creamos matriz de rotación alrededor del eje X (para movimiento vertical)
-            y_rot_mat = (
-                tr.translate(*target) @ tr.rotationX(y_angle) @ tr.translate(*-target)
-            )
-
-            # Aplicamos ambas rotaciones a la pose anterior
-            self._n_pose = y_rot_mat @ x_rot_mat @ self._pose
-
-        # Interpretamos el arrastre como un roll sobre el eje de la cámara
-        elif self._state == Arcball.STATE_ROLL:
-            # Calculamos el centro de la ventana
-            center = self._size / 2.0
-            # Vector desde el centro hasta el punto inicial
-            v_init = self._pdown - center
-            # Vector desde el centro hasta el punto actual
-            v_curr = point - center
-            
-            # Normalizamos ambos vectores
-            v_init = v_init / np.linalg.norm(v_init)
-            v_curr = v_curr / np.linalg.norm(v_curr)
-
-            # Calculamos el ángulo entre los dos vectores
-            theta = -np.arctan2(v_curr[1], v_curr[0]) + np.arctan2(v_init[1], v_init[0])
-
-            # Creamos matriz de rotación alrededor del eje Z
-            rot_mat = (
-                tr.translate(*target) @ tr.rotationZ(theta) @ tr.translate(*-target)
-            )
-
-            # Aplicamos la rotación a la pose anterior
-            self._n_pose = rot_mat.dot(self._pose)
-
-        # Interpretamos el arrastre como un paneo de cámara en el plano de vista
+            self._drag_rotate(delta, size_factor)
         elif self._state == Arcball.STATE_PAN:
-            # Calculamos la magnitud del desplazamiento, ajustando por escala
-            dx = -dx / (3.0 * mindim) * self._scale
-            dy = -dy / (3.0 * mindim) * self._scale
-
-            # Calculamos el vector de traslación en el espacio 3D
-            # usando los ejes X e Y de la cámara como direcciones
-            translation = dx * x_axis + dy * y_axis
-            
-            # Actualizamos el punto objetivo
-            self._n_target = self._target + translation
-            
-            # Creamos una matriz de traslación
-            t_tf = np.eye(4)  # Comenzamos con una matriz identidad
-            t_tf[:3, 3] = translation  # Establecemos la parte de traslación
-            
-            # Aplicamos la traslación a la pose anterior
-            self._n_pose = t_tf.dot(self._pose)
-
-        # Interpretamos el arrastre como un movimiento de zoom
+            self._drag_pan(delta, size_factor)
+        elif self._state == Arcball.STATE_ROLL:
+            self._drag_roll(point)
         elif self._state == Arcball.STATE_ZOOM:
-            # Calculamos la distancia actual entre la cámara y el objetivo
-            radius = np.linalg.norm(eye - target)
-            ratio = 0.0
-            
-            # Calculamos el factor de zoom basado en el movimiento vertical
-            if dy > 0:
-                ratio = np.exp(abs(dy) / (0.5 * self._size[1])) - 1.0
-            elif dy < 0:
-                ratio = 1.0 - np.exp(dy / (0.5 * (self._size[1])))
-                
-            # Calculamos el vector de traslación para el zoom
-            # Nos movemos a lo largo del eje Z de la cámara
-            translation = -np.sign(dy) * ratio * radius * z_axis
-            
-            # Creamos una matriz de traslación
-            t_tf = np.eye(4)
-            t_tf[:3, 3] = translation
-            
-            # Aplicamos la traslación a la pose actual
-            self._n_pose = t_tf.dot(self._pose)
+            self._drag_zoom(delta[1], size_factor)
 
-        # Después de actualizar self._n_pose, estabilizamos la matriz
-        # para prevenir la acumulación de errores numéricos
-        self.stabilize_rotation()
+    def _drag_rotate(self, delta, size_factor):
+        """Rotación esférica alrededor del objetivo.
+        
+        Las rotaciones siempre son alrededor del target, que debe ser
+        el centro del objeto que quieres rotar.
+        """
+        # Ángulos de rotación
+        yaw = -delta[0] / size_factor    # Rotación horizontal
+        pitch = delta[1] / size_factor   # Rotación vertical
+        
+        # Para asegurar que la rotación sea alrededor del target,
+        # creamos matrices de traslación explícitas
+        
+        # Matriz para trasladar al origen (mover por -target)
+        to_origin = np.eye(4)
+        to_origin[:3, 3] = -self._drag_target
+        
+        # Matriz para trasladar de vuelta (mover por +target)  
+        from_origin = np.eye(4)
+        from_origin[:3, 3] = self._drag_target
+        
+        # Rotación horizontal alrededor del eje Y mundial
+        # La rotación se hace en el origen, luego se traslada de vuelta
+        yaw_matrix = from_origin @ tr.rotationY(yaw) @ to_origin
+        
+        # Aplicar yaw primero
+        temp_pose = yaw_matrix @ self._drag_pose
+        
+        # Rotación vertical alrededor del eje X local de la cámara
+        local_x = temp_pose[:3, 0]
+        
+        # Matriz de rotación para pitch alrededor del eje X local
+        pitch_rot = self._axis_angle_matrix(pitch, local_x)
+        pitch_matrix = from_origin @ pitch_rot @ to_origin
+        
+        # Combinar ambas rotaciones
+        self._pose = pitch_matrix @ temp_pose
+
+    def _drag_pan(self, delta, size_factor):
+        """Traslación en el plano de la cámara."""
+        # Escalar el movimiento
+        dx = -delta[0] / (3.0 * size_factor) * self._scale
+        dy = -delta[1] / (3.0 * size_factor) * self._scale
+        
+        # Vectores de la cámara
+        right = self._drag_pose[:3, 0]
+        up = self._drag_pose[:3, 1]
+        
+        # Desplazamiento total
+        translation = dx * right + dy * up
+        
+        # Actualizar objetivo y pose
+        self._target = self._drag_target + translation
+        self._pose[:3, 3] = self._drag_pose[:3, 3] + translation
+
+    def _drag_roll(self, point):
+        """Rotación alrededor del eje de vista que pasa por el target.
+        
+        El roll es rotación alrededor del eje que va desde la cámara al target.
+        """
+        # Calcular el ángulo de rotación basado en el movimiento del mouse
+        center = self._size / 2.0
+        v_start = self._drag_start - center
+        v_current = point - center
+        
+        # Normalizar vectores para calcular ángulo
+        norm_start = np.linalg.norm(v_start)
+        norm_current = np.linalg.norm(v_current)
+        
+        if norm_start < 1e-6 or norm_current < 1e-6:
+            return
+        
+        v_start = v_start / norm_start
+        v_current = v_current / norm_current
+        
+        # Ángulo de rotación
+        roll_angle = np.arctan2(v_current[1], v_current[0]) - np.arctan2(v_start[1], v_start[0])
+        
+        # Eje de rotación: vector desde target hacia la cámara
+        eye = self._drag_pose[:3, 3]
+        axis = eye - self._drag_target
+        axis_norm = np.linalg.norm(axis)
+        
+        if axis_norm < 1e-6:
+            # Caso degenerado: usar eje Z de la cámara
+            axis = self._drag_pose[:3, 2]
+        else:
+            axis = axis / axis_norm
+        
+        # Matrices de traslación explícitas
+        to_origin = np.eye(4)
+        to_origin[:3, 3] = -self._drag_target
+        
+        from_origin = np.eye(4)
+        from_origin[:3, 3] = self._drag_target
+        
+        # Rotar alrededor del eje que pasa por el target
+        roll_rot = self._axis_angle_matrix(roll_angle, axis)
+        roll_matrix = from_origin @ roll_rot @ to_origin
+        
+        self._pose = roll_matrix @ self._drag_pose
+
+    def _drag_zoom(self, dy, size_factor):
+        """Zoom mediante arrastre vertical."""
+        # Usar escala logarítmica para zoom uniforme
+        factor = dy / size_factor
+        self._apply_zoom(factor)
 
     def scroll(self, clicks):
-        """Zoom usando el movimiento de la rueda del ratón.
-
-        Parámetros
-        ----------
-        clicks : int
-            El número de clics. Números positivos indican movimiento de
-            la rueda hacia adelante.
+        """Zoom con la rueda del mouse usando escala logarítmica.
+        
+        El zoom es uniforme en escala logarítmica, lo que significa
+        que cada clic mueve la misma "cantidad perceptual" sin importar
+        la distancia actual.
         """
-        target = self._target
-        # Factor de escala para cada clic de la rueda
-        ratio = 0.90
-
-        # Calculamos el multiplicador basado en la dirección de los clics
-        mult = 1.0
-        if clicks > 0:
-            # Acercamiento: reducimos el radio
-            mult = ratio**clicks
-        elif clicks < 0:
-            # Alejamiento: aumentamos el radio
-            mult = (1.0 / ratio) ** abs(clicks)
-
-        # Para la nueva pose
-        z_axis = self._n_pose[:3, 2].flatten()  # Dirección de profundidad
-        eye = self._n_pose[:3, 3].flatten()     # Posición de la cámara
-        radius = np.linalg.norm(eye - target)   # Distancia al objetivo
+        if clicks == 0:
+            return
         
-        # Calculamos el vector de traslación para el zoom
-        translation = (mult * radius - radius) * z_axis
+        # Factor de zoom en escala logarítmica
+        # Cada clic cambia el logaritmo de la distancia por una cantidad fija
+        factor = -clicks * self._zoom_speed
+        self._apply_zoom(factor)
+
+    def _apply_zoom(self, log_factor):
+        """Aplica zoom usando factor logarítmico.
         
-        # Aplicamos la traslación a la nueva pose
-        t_tf = np.eye(4)
-        t_tf[:3, 3] = translation
-        self._n_pose = t_tf.dot(self._n_pose)
-
-        # Para la pose anterior
-        z_axis = self._pose[:3, 2].flatten()
-        eye = self._pose[:3, 3].flatten()
-        radius = np.linalg.norm(eye - target)
+        Este es el corazón del nuevo sistema de zoom. Usamos:
+        nueva_distancia = exp(log(distancia_actual) + factor)
         
-        # Aplicamos la traslación a la pose anterior
-        translation = (mult * radius - radius) * z_axis
-        t_tf = np.eye(4)
-        t_tf[:3, 3] = translation
-        self._pose = t_tf.dot(self._pose)
-
-    def rotate(self, azimuth, axis=None):
-        """Rota el arcball alrededor del eje "Up" en azimuth radianes.
-
-        Parámetros
-        ----------
-        azimuth : float
-            El número de radianes a rotar.
+        Esto garantiza movimiento perceptualmente uniforme en todas las escalas.
         """
-        target = self._target
-
-        # Creamos matriz de rotación alrededor del eje Y (eje "Up" por defecto)
-        # Primero trasladamos al centro, rotamos, y trasladamos de vuelta
-        x_rot_mat = (
-            tr.translate(*target) @ tr.rotationY(azimuth) @ tr.translate(*-target)
-        )
+        eye = self._pose[:3, 3]
+        to_eye = eye - self._target
+        current_distance = np.linalg.norm(to_eye)
         
-        # Aplicamos la rotación a ambas poses
-        self._n_pose = x_rot_mat @ self._n_pose        
-        self._pose = x_rot_mat @ self._pose
+        # Manejar caso degenerado
+        if current_distance < 1e-10:
+            direction = self._pose[:3, 2]
+            current_distance = 1e-6
+        else:
+            direction = to_eye / current_distance
+        
+        # Calcular nueva distancia en escala logarítmica
+        # log_distance = log(current) + factor
+        # new_distance = exp(log_distance) = exp(log(current) + factor) = current * exp(factor)
+        
+        # Pero para mejor control cerca de cero, usamos una interpolación suave
+        if current_distance < 0.01:
+            # Cerca de cero, usar movimiento lineal
+            new_distance = current_distance * (1.0 - log_factor * 10)
+            new_distance = max(1e-8, new_distance)  # Prevenir negativos
+        else:
+            # Lejos de cero, usar escala logarítmica completa
+            log_distance = np.log(current_distance) + log_factor
+            new_distance = np.exp(log_distance)
+        
+        # Aplicar límites si están definidos
+        if self._min_distance is not None:
+            new_distance = max(new_distance, self._min_distance)
+        if self._max_distance is not None:
+            new_distance = min(new_distance, self._max_distance)
+        
+        # Actualizar posición de la cámara
+        new_eye = self._target + direction * new_distance
+        self._pose[:3, 3] = new_eye
+
+    def rotate(self, angle, axis=None):
+        """Rota la cámara alrededor de un eje que pasa por el objetivo."""
+        # Determinar matriz de rotación
+        if axis is None or axis == 'y':
+            rot_matrix = tr.rotationY(angle)
+        elif axis == 'x':
+            rot_matrix = tr.rotationX(angle)
+        elif axis == 'z':
+            rot_matrix = tr.rotationZ(angle)
+        else:
+            # Eje arbitrario
+            rot_matrix = self._axis_angle_matrix(angle, axis)
+        
+        # Matrices de traslación explícitas para rotar alrededor del target
+        to_origin = np.eye(4)
+        to_origin[:3, 3] = -self._target
+        
+        from_origin = np.eye(4)
+        from_origin[:3, 3] = self._target
+        
+        # Aplicar rotación alrededor del objetivo
+        transform = from_origin @ rot_matrix @ to_origin
+        
+        self._pose = transform @ self._pose
+
+    def _axis_angle_matrix(self, angle, axis):
+        """Crea matriz de rotación 4x4 desde ángulo y eje (Rodrigues)."""
+        axis = np.array(axis, dtype=np.float64)
+        axis = axis / np.linalg.norm(axis)
+        
+        c = np.cos(angle)
+        s = np.sin(angle)
+        t = 1 - c
+        x, y, z = axis
+        
+        rotation = np.array([
+            [t*x*x + c,   t*x*y - s*z, t*x*z + s*y],
+            [t*x*y + s*z, t*y*y + c,   t*y*z - s*x],
+            [t*x*z - s*y, t*y*z + s*x, t*z*z + c]
+        ])
+        
+        matrix = np.eye(4)
+        matrix[:3, :3] = rotation
+        return matrix
 
     def stabilize_rotation(self):
-        """Estabiliza la matriz de rotación para prevenir la deriva
-        debido a acumulación de errores numéricos."""
-        # Extraemos la parte de rotación de la matriz
-        rotation = self._n_pose[:3, :3]
+        """Reortogonaliza la matriz de rotación para evitar drift numérico.
         
-        # Extraemos los vectores de los ejes actuales
-        x = rotation[:, 0]  # Vector X actual
-        y = rotation[:, 1]  # Vector Y actual
+        Este método se puede llamar periódicamente si se nota distorsión
+        después de muchas operaciones.
+        """
+        # Extraer componente de rotación
+        rotation = self._pose[:3, :3]
         
-        # Paso 1: Normalizamos el eje X para asegurar longitud unitaria
+        # Gram-Schmidt para reortogonalizar
+        x = rotation[:, 0]
+        y = rotation[:, 1]
+        
+        # Normalizar X
         x = x / np.linalg.norm(x)
         
-        # Paso 2: Hacemos que Y sea ortogonal a X mediante proyección
-        # Restamos la componente de Y que está en dirección X
+        # Hacer Y ortogonal a X y normalizar
         y = y - np.dot(y, x) * x
-        # Normalizamos Y
         y = y / np.linalg.norm(y)
         
-        # Paso 3: Calculamos Z como producto cruz de X y Y
-        # Esto garantiza que Z es perpendicular a ambos X e Y
+        # Z es producto cruz
         z = np.cross(x, y)
         
-        # Paso 4: Actualizamos la matriz con los ejes ortonormales
-        self._n_pose[:3, 0] = x
-        self._n_pose[:3, 1] = y
-        self._n_pose[:3, 2] = z
+        # Reconstruir matriz ortogonal
+        self._pose[:3, 0] = x
+        self._pose[:3, 1] = y
+        self._pose[:3, 2] = z

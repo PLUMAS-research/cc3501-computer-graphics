@@ -90,5 +90,8 @@ grafica_cli.add_command(camera_path)
 from examples.pyvista_orbital import orbital
 grafica_cli.add_command(orbital)
 
+from examples.sugecon import suggestive_contours
+grafica_cli.add_command(suggestive_contours)
+
 if __name__ == '__main__':
     grafica_cli()

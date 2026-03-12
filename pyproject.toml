@@ -13,5 +13,8 @@ dependencies = [
     "pyglet>=2.1.13",
     "pymunk>=7.2.0",
     "pyopengl>=3.1.10",
+    "pyvista>=0.47.1",
+    "rtree>=1.4.1",
+    "sympy>=1.14.0",
     "trimesh>=4.11.3",
 ]

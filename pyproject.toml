@@ -1,0 +1,17 @@
+[project]
+name = "cc3501-computer-graphics"
+version = "0.1.0"
+description = "Material práctico del curso CC3501 - Computación gráfica y modelamiento, del Departamento de Ciencias de la Computación de la Universidad de Chile"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.3.1",
+    "matplotlib>=3.10.8",
+    "mesa>=3.3.1",
+    "networkx>=3.6.1",
+    "numpy<2.4.0",
+    "pyglet>=2.1.13",
+    "pymunk>=7.2.0",
+    "pyopengl>=3.1.10",
+    "trimesh>=4.11.3",
+]

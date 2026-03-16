@@ -121,5 +121,9 @@ from examples.sugecon import suggestive_contours
 
 grafica_cli.add_command(suggestive_contours)
 
+from examples.degradado import degradado
+
+grafica_cli.add_command(degradado)
+
 if __name__ == "__main__":
     grafica_cli()

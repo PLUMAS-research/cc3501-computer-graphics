@@ -125,5 +125,9 @@ from examples.degradado import degradado
 
 grafica_cli.add_command(degradado)
 
+from examples.bad_tv import bad_tv
+
+grafica_cli.add_command(bad_tv)
+
 if __name__ == "__main__":
     grafica_cli()

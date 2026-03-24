@@ -11,11 +11,16 @@ from grafica.utils import load_pipeline
 @click.command("sr_jengibre_numpy", short_help="Atractor Gingerbreadman generado con NumPy")
 @click.option("--width", default=512, help="Ancho de la textura")
 @click.option("--height", default=512, help="Alto de la textura")
-@click.option("--steps", default=100, help="Pasos por frame")
-def gingerbread_numpy(width, height, steps):
+@click.option("--steps", default=500, help="Pasos por frame")
+@click.option("--flip/--no-flip", default=True,
+              help="Voltear la textura verticalmente (np.flipud). "
+                   "Con --flip, la fila 0 del array (y_min) queda arriba "
+                   "(convención de imagen). Con --no-flip, y_min queda abajo "
+                   "(convención matemática/OpenGL).")
+def gingerbread_numpy(width, height, steps, flip):
     
-    # Configuración del atractor. Usamos múltiples partículas para ver mejor 
-    num_particles = 10
+    # Configuración del atractor. Usamos múltiples partículas para ver mejor
+    num_particles = 50
     particles_x = np.random.uniform(-0.5, 0.5, num_particles)
     particles_y = np.random.uniform(-0.5, 0.5, num_particles)
     
@@ -79,17 +84,23 @@ def gingerbread_numpy(width, height, steps):
         else:
             normalized = accumulator
         
-        # Crear imagen RGB con gradiente de color
+        # Crear imagen RGB con paleta "hot metal"
+        # negro -> rojo -> naranja -> amarillo -> blanco
         texture_data = np.zeros((height, width, 3), dtype=np.uint8)
-        intensity = (normalized * 255).astype(np.uint8)
+        t = normalized
+
+        texture_data[:, :, 0] = (np.clip(3.0 * t, 0, 1) * 255).astype(np.uint8)
+        texture_data[:, :, 1] = (np.clip(3.0 * t - 1.0, 0, 1) * 255).astype(np.uint8)
+        texture_data[:, :, 2] = (np.clip(3.0 * t - 2.0, 0, 1) * 255).astype(np.uint8)
         
-        # Paleta de colores de azul oscuro a amarillo brillante
-        texture_data[:, :, 0] = intensity  # rojo
-        texture_data[:, :, 1] = (intensity * 0.8).astype(np.uint8)  # verde
-        texture_data[:, :, 2] = ((1.0 - normalized) * 100).astype(np.uint8)  # azul inverso
-        
-        # Voltear verticalmente (OpenGL tiene origen abajo-izquierda)
-        texture_data = np.flipud(texture_data)
+        # np.flipud invierte el eje vertical.
+        # Sin flip: la fila 0 del array (y_min) va al fondo de la textura OpenGL,
+        #   que tiene origen abajo-izquierda. Resultado: y crece hacia arriba
+        #   (convención matemática, coincide con la versión GPU).
+        # Con flip: la fila 0 (y_min) va al tope de la textura.
+        #   Resultado: y crece hacia abajo (convención de imagen).
+        if flip:
+            texture_data = np.flipud(texture_data)
         
         return texture_data
 
@@ -99,8 +110,8 @@ def gingerbread_numpy(width, height, steps):
     # Crear textura
     texture_id = GL.glGenTextures(1)
     GL.glBindTexture(GL.GL_TEXTURE_2D, texture_id)
-    GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_NEAREST)
-    GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_NEAREST)
+    GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR)
+    GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR)
     GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL.GL_CLAMP_TO_EDGE)
     GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL.GL_CLAMP_TO_EDGE)
     

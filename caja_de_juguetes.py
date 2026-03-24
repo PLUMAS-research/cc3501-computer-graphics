@@ -129,5 +129,9 @@ from examples.bad_tv import bad_tv
 
 grafica_cli.add_command(bad_tv)
 
+from examples.buddhabrot import buddhabrot
+
+grafica_cli.add_command(buddhabrot)
+
 if __name__ == "__main__":
     grafica_cli()

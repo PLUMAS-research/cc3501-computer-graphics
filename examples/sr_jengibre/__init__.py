@@ -1,3 +1,4 @@
+import ctypes
 import os
 from pathlib import Path
 
@@ -9,100 +10,211 @@ from OpenGL import GL
 from grafica.utils import load_pipeline
 
 
-@click.command("sr_jengibre", short_help="Señor Jengibre")
+@click.command("sr_jengibre", short_help="Señor Jengibre (acumulación en GPU)")
 @click.option("--width", type=int, default=800)
 @click.option("--height", type=int, default=800)
-@click.option("--x0", type=float, default=-0.01)
-@click.option("--y0", type=float, default=0.0)
-def sr_jengibre(width, height, x0, y0):
-    win = pyglet.window.Window(width, height)
+@click.option("--particles", type=int, default=20, help="Número de partículas")
+@click.option("--steps", type=int, default=200, help="Pasos de iteración por frame")
+def sr_jengibre(width, height, particles, steps):
+    """Atractor Gingerbreadman con acumulación en GPU.
 
-    vertices = np.array([-1, -1, 1, -1, 1,  1, -1,  1], dtype=np.float32)
-    uv = np.array([0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0], dtype=np.float32)
-    indices = np.array([0, 1, 2, 2, 3, 0], dtype=np.uint32)
+    La iteración del mapa ocurre en CPU (NumPy), pero los puntos visitados
+    se acumulan en la GPU usando GL_POINTS con blending aditivo sobre un
+    framebuffer con textura float. Un fragment shader de visualización
+    aplica tone mapping y una paleta de color.
+    """
 
-    pipeline_iteration = load_pipeline(
+    # Estado de las partículas
+    px = np.random.uniform(-0.5, 0.5, particles)
+    py = np.random.uniform(-0.5, 0.5, particles)
+
+    # Rango del espacio de fase
+    x_min, x_max = -5.0, 9.0
+    y_min, y_max = -5.0, 9.0
+
+    def iterate_and_collect(num_steps):
+        """Itera el mapa de Gingerbreadman y retorna puntos en NDC."""
+        nonlocal px, py
+
+        all_x = np.empty(num_steps * particles)
+        all_y = np.empty(num_steps * particles)
+        count = 0
+
+        for _ in range(num_steps):
+            # Un paso del mapa: x' = 1 - y + |x|, y' = x
+            new_x = 1 - py + np.abs(px)
+            new_y = px.copy()
+            px[:] = new_x
+            py[:] = new_y
+
+            # Reiniciar partículas que se escapan
+            escaped = (np.abs(px) > 20) | (np.abs(py) > 20)
+            px[escaped] = np.random.uniform(-0.5, 0.5, escaped.sum())
+            py[escaped] = np.random.uniform(-0.5, 0.5, escaped.sum())
+
+            # Filtrar las que están dentro del rango visible
+            visible = ((px >= x_min) & (px <= x_max) &
+                       (py >= y_min) & (py <= y_max))
+            n = visible.sum()
+            if n > 0:
+                all_x[count:count + n] = px[visible]
+                all_y[count:count + n] = py[visible]
+                count += n
+
+        if count == 0:
+            return np.empty((0, 2), dtype=np.float32)
+
+        # Convertir a NDC [-1, 1]
+        ndc_x = 2.0 * (all_x[:count] - x_min) / (x_max - x_min) - 1.0
+        ndc_y = 2.0 * (all_y[:count] - y_min) / (y_max - y_min) - 1.0
+
+        return np.column_stack([ndc_x, ndc_y]).astype(np.float32)
+
+    # --- Ventana ---
+    win = pyglet.window.Window(width, height, caption="Sr. Jengibre")
+
+    # --- Framebuffer de acumulación con textura float ---
+    accum_tex = GL.glGenTextures(1)
+    GL.glBindTexture(GL.GL_TEXTURE_2D, accum_tex)
+    GL.glTexImage2D(
+        GL.GL_TEXTURE_2D, 0, GL.GL_R16F,
+        width, height, 0,
+        GL.GL_RED, GL.GL_FLOAT, None
+    )
+    GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR)
+    GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR)
+    GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL.GL_CLAMP_TO_EDGE)
+    GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL.GL_CLAMP_TO_EDGE)
+
+    fbo = GL.glGenFramebuffers(1)
+    GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, fbo)
+    GL.glFramebufferTexture2D(
+        GL.GL_FRAMEBUFFER, GL.GL_COLOR_ATTACHMENT0,
+        GL.GL_TEXTURE_2D, accum_tex, 0
+    )
+    GL.glClearColor(0.0, 0.0, 0.0, 0.0)
+    GL.glClear(GL.GL_COLOR_BUFFER_BIT)
+    GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
+
+    # --- Pipeline de puntos ---
+    pipeline_points = load_pipeline(
         Path(os.path.dirname(__file__)) / "vertex_program.glsl",
-        Path(os.path.dirname(__file__)) / "iteration.glsl",
+        Path(os.path.dirname(__file__)) / "point_fragment.glsl",
     )
 
-    pipeline_visualization = load_pipeline(
+    # VAO y VBO para los puntos
+    vao_points = GL.glGenVertexArrays(1)
+    vbo_points = GL.glGenBuffers(1)
+
+    GL.glBindVertexArray(vao_points)
+    GL.glBindBuffer(GL.GL_ARRAY_BUFFER, vbo_points)
+    pos_loc = GL.glGetAttribLocation(pipeline_points.id, "position")
+    GL.glEnableVertexAttribArray(pos_loc)
+    GL.glVertexAttribPointer(pos_loc, 2, GL.GL_FLOAT, GL.GL_FALSE, 0, ctypes.c_void_p(0))
+    GL.glBindVertexArray(0)
+
+    # --- Pipeline de visualización ---
+    pipeline_vis = load_pipeline(
         Path(os.path.dirname(__file__)) / "vertex_program.glsl",
         Path(os.path.dirname(__file__)) / "visualization.glsl",
     )
-    
-    accumulation_buffer = pyglet.image.Texture.create(width, height)
-    framebuffer_accumulation = pyglet.image.Framebuffer()
-    framebuffer_accumulation.attach_texture(accumulation_buffer, attachment=GL.GL_COLOR_ATTACHMENT0)
 
-    iteration_buffer = pyglet.image.Texture.create(width, height)
-    framebuffer_iteration = pyglet.image.Framebuffer()
-    framebuffer_iteration.attach_texture(iteration_buffer, attachment=GL.GL_COLOR_ATTACHMENT0)
+    # Cuadrilátero fullscreen
+    vertices = np.array([-1, -1, 1, -1, 1, 1, -1, 1], dtype=np.float32)
+    uv = np.array([0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0], dtype=np.float32)
+    indices = np.array([0, 1, 2, 2, 3, 0], dtype=np.uint32)
 
-    visualization_buffer = pyglet.image.Texture.create(width, height)
-    framebuffer_visualization = pyglet.image.Framebuffer()
-    framebuffer_visualization.attach_texture(visualization_buffer, attachment=GL.GL_COLOR_ATTACHMENT0)
+    gpu_quad = pipeline_vis.vertex_list_indexed(4, GL.GL_TRIANGLES, indices)
+    gpu_quad.position[:] = vertices
+    gpu_quad.uv[:] = uv
 
-    gpu_data = pipeline_visualization.vertex_list_indexed(4, GL.GL_TRIANGLES, indices)
-    gpu_data.position[:] = vertices
-    gpu_data.uv[:] = uv
-    
-    pipeline_iteration['resolution'] = (width, height)
+    # Estado
+    paused = False
+    current_steps = steps
+    exposure = 0.02
 
-    min_x, max_x = -3.0, 8.0  # Rango aproximado del atractor en x
-    min_y, max_y = -3.0, 8.0  # Rango aproximado del atractor en y
-    raw_pos = (x0, y0)  # Posición matemática real
-    norm_pos = (  # Posición normalizada para visualización
-        (x0 - min_x) / (max_x - min_x),
-        (y0 - min_y) / (max_y - min_y)
-    )
+    def tick(dt):
+        if paused:
+            return
+
+        points = iterate_and_collect(current_steps)
+        if len(points) == 0:
+            return
+
+        # Acumular en el framebuffer con blending aditivo
+        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, fbo)
+        GL.glViewport(0, 0, width, height)
+        GL.glEnable(GL.GL_BLEND)
+        GL.glBlendFunc(GL.GL_ONE, GL.GL_ONE)
+
+        pipeline_points.use()
+
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, vbo_points)
+        GL.glBufferData(
+            GL.GL_ARRAY_BUFFER, points.nbytes, points, GL.GL_STREAM_DRAW
+        )
+        GL.glBindVertexArray(vao_points)
+        GL.glDrawArrays(GL.GL_POINTS, 0, len(points))
+        GL.glBindVertexArray(0)
+
+        GL.glDisable(GL.GL_BLEND)
+        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
+
+    @win.event
+    def on_key_press(symbol, modifiers):
+        nonlocal paused, current_steps, exposure, px, py
+
+        if symbol == pyglet.window.key.SPACE:
+            paused = not paused
+            print("Pausado" if paused else "Reanudado")
+        elif symbol == pyglet.window.key.R:
+            GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, fbo)
+            GL.glClearColor(0.0, 0.0, 0.0, 0.0)
+            GL.glClear(GL.GL_COLOR_BUFFER_BIT)
+            GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
+            px[:] = np.random.uniform(-0.5, 0.5, particles)
+            py[:] = np.random.uniform(-0.5, 0.5, particles)
+            print("Reiniciado")
+        elif symbol == pyglet.window.key.PLUS or symbol == pyglet.window.key.EQUAL:
+            current_steps = min(current_steps * 2, 10000)
+            print(f"Pasos por frame: {current_steps}")
+        elif symbol == pyglet.window.key.MINUS:
+            current_steps = max(current_steps // 2, 1)
+            print(f"Pasos por frame: {current_steps}")
+        elif symbol == pyglet.window.key.UP:
+            exposure *= 2.0
+            print(f"Exposición: {exposure:.6f}")
+        elif symbol == pyglet.window.key.DOWN:
+            exposure /= 2.0
+            print(f"Exposición: {exposure:.6f}")
 
     @win.event
     def on_draw():
-        GL.glClearColor(0.0, 0.0, 0.0, 1.0)
         win.clear()
-                   
-        pipeline_visualization.use()
-        GL.glBindTexture(visualization_buffer.target, visualization_buffer.id)   
-        gpu_data.draw(GL.GL_TRIANGLES)     
+        GL.glViewport(0, 0, width, height)
 
+        pipeline_vis.use()
 
-    def update(dt, window):
-        nonlocal raw_pos, norm_pos
+        GL.glActiveTexture(GL.GL_TEXTURE0)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, accum_tex)
 
-        x, y = raw_pos
-        raw_pos = (1 - y + abs(x), x)
-        
-        norm_pos = (
-            (raw_pos[0] - min_x) / (max_x - min_x),
-            (raw_pos[1] - min_y) / (max_y - min_y)
-        )
+        sampler_loc = GL.glGetUniformLocation(pipeline_vis.id, "accum_tex")
+        if sampler_loc != -1:
+            GL.glUniform1i(sampler_loc, 0)
 
-        # render to texture
-        # aquí pintamos un píxel de blanco si le toca ser el siguiente
-        # y los que no, pierden algo de color
-        framebuffer_iteration.bind()
-        pipeline_iteration.use()
-        GL.glBindTexture(iteration_buffer.target, iteration_buffer.id)
-        pipeline_iteration['current_pos'] = norm_pos
-        gpu_data.draw(GL.GL_TRIANGLES)
-        framebuffer_iteration.unbind()
+        exposure_loc = GL.glGetUniformLocation(pipeline_vis.id, "exposure")
+        if exposure_loc != -1:
+            GL.glUniform1f(exposure_loc, exposure)
 
-        # render to texture
-        # aquí copiamos los resultados en dos texturas diferentes:
-        # una, la textura que lee el programa anterior
-        # la otra, la textura que se grafica
-        # en ambos casos solo graficamos directamente el color de la textura
-        framebuffer_accumulation.bind()
-        pipeline_visualization.use()
-        gpu_data.draw(GL.GL_TRIANGLES)
-        framebuffer_accumulation.unbind()
+        gpu_quad.draw(GL.GL_TRIANGLES)
 
-        framebuffer_visualization.bind()
-        pipeline_visualization.use()
-        gpu_data.draw(GL.GL_TRIANGLES)
-        framebuffer_visualization.unbind()
+    print("Sr. Jengibre (acumulación en GPU)")
+    print("Controles:")
+    print("  ESPACIO: pausar/reanudar")
+    print("  R: reiniciar")
+    print("  +/-: más/menos pasos por frame")
+    print("  ARRIBA/ABAJO: ajustar exposición")
+    print(f"  Partículas: {particles}, Pasos/frame: {steps}")
 
-
-    pyglet.clock.schedule_interval(update, 1 / 120.0, win)
+    pyglet.clock.schedule_interval(tick, 1 / 60.0)
     pyglet.app.run()

@@ -5,5 +5,8 @@ out vec4 out_color;
 uniform sampler2D sampler_tex;
 
 void main() {
-    out_color = 1.5 * texture(sampler_tex, frag_texcoord);
+    // La paleta ya viene aplicada desde la CPU,
+    // así que aquí solo suavizamos con un pequeño boost de contraste
+    vec3 color = texture(sampler_tex, frag_texcoord).rgb;
+    out_color = vec4(color, 1.0);
 }

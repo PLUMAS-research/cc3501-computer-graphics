@@ -1,7 +1,5 @@
 import os
-from collections import deque
 from pathlib import Path
-import random
 
 import numpy as np
 import OpenGL.GL as GL
@@ -10,16 +8,25 @@ import pyglet
 import click
 
 from grafica.utils import load_pipeline
-from grafica.particle import Particle
+from grafica.particle import ParticleSystem
 
-@click.command("particles", short_help='Partículas simples con comportamiento basado en fuerzas')
+
+# %% Comando principal
+
+@click.command("particles", short_help="Partículas simples con comportamiento basado en fuerzas")
 @click.option("--width", type=int, default=900)
 @click.option("--height", type=int, default=600)
 @click.option("--max_ttl", type=int, default=3)
 @click.option("--emission_rate", type=int, default=3, help="Partículas emitidas por frame")
-def particulas(width, height, max_ttl, emission_rate):
+@click.option("--max_particles", type=int, default=500)
+@click.option(
+    "--integrator",
+    type=click.Choice(["verlet", "euler"]),
+    default="euler",
+    help="Método de integración: verlet (preciso, 2 eval/paso) o euler simpléctico (rápido, 1 eval/paso)",
+)
+def particulas(width, height, max_ttl, emission_rate, max_particles, integrator):
     win = pyglet.window.Window(width, height)
-    boundaries = (width, height)
 
     pipeline = load_pipeline(
         Path(os.path.dirname(__file__)) / "point_vertex_program.glsl",
@@ -28,95 +35,141 @@ def particulas(width, height, max_ttl, emission_rate):
 
     pipeline.use()
     pipeline["max_ttl"] = max_ttl
-    pipeline['resolution'] = (width, height)
+    pipeline["resolution"] = (width, height)
 
-    # Colección de partículas
-    particles = deque()
-    particle_data = None
-    
-    # Tiempo global
+    # %% Sistema de partículas vectorizado
+
+    system = ParticleSystem(max_particles)
+
+    # Selección de integrador
+    step = system.update if integrator == "verlet" else system.update_euler
+
+    # Tiempo global y posición del mouse
     time = 0.0
-    
-    # Última posición del mouse
     last_mouse_pos = np.array([width // 2, height // 2], dtype=np.float32)
 
-    def create_particle(position):
-        """Función para crear partículas con propiedades personalizadas."""
-        # Velocidad inicial aleatoria en todas direcciones
-        angle = random.uniform(0, 2*np.pi)
-        speed = random.uniform(10, 80)
-        velocity = np.array([
-            speed * np.cos(angle), 
-            speed * np.sin(angle) - 30
-        ], dtype=np.float32)
-        
-        # Aceleración inicial (gravedad)
-        acceleration = np.array([0, -98], dtype=np.float32)
-        
-        # Masa y tiempo de vida variables
-        mass = random.uniform(0.8, 1.2)
-        ttl = max_ttl * random.uniform(0.7, 1.3)
-        
-        return Particle(position, velocity, acceleration, mass, ttl)
+    # %% Buffer de GPU preasignado
+    # Los slots inactivos tienen ttl=0, por lo que el shader los hace
+    # invisibles (gl_PointSize=0, alpha=0). Esto evita recrear buffers.
 
-    def apply_forces(particle):
-        """Función que aplica todas las fuerzas a una partícula."""
-        # 1. Gravedad (siempre presente)
-        particle.apply_force(np.array([0, -98], dtype=np.float32))
-        
+    particle_data = pipeline.vertex_list(
+        max_particles, pyglet.gl.GL_POINTS, position="f", ttl="f"
+    )
+
+    # Array de zeros preasignado para limpiar slots inactivos en GPU
+    _zero_ttl = np.zeros(max_particles, dtype=np.float32)
+
+    # %% Scratch arrays preasignados para evitar allocaciones por frame
+    # Se usan dentro de apply_forces y emit_batch.
+
+    _scratch_repulsion = np.zeros((max_particles, 2), dtype=np.float32)
+    _scratch_turbulence = np.zeros((max_particles, 2), dtype=np.float32)
+    _scratch_mass_col = np.zeros((max_particles, 1), dtype=np.float32)
+
+    # Generador de números aleatorios con soporte para out=
+    _rng = np.random.default_rng()
+
+    # %% Emisión de partículas
+
+    def emit_batch(n, center):
+        """Emite n partículas centradas en ``center`` con jitter."""
+        if n <= 0:
+            return
+        positions = center + np.random.uniform(-15, 15, (n, 2)).astype(np.float32)
+
+        angles = np.random.uniform(0, 2 * np.pi, n).astype(np.float32)
+        speeds = np.random.uniform(10, 80, n).astype(np.float32)
+        velocities = np.column_stack([
+            speeds * np.cos(angles),
+            speeds * np.sin(angles) - 30,
+        ]).astype(np.float32)
+
+        masses = np.random.uniform(0.8, 1.2, n).astype(np.float32)
+        ttls = (max_ttl * np.random.uniform(0.7, 1.3, n)).astype(np.float32)
+
+        system.emit(positions, velocities, masses, ttls)
+
+    # %% Fuerzas vectorizadas (sin allocaciones temporales)
+
+    def apply_forces(sys, s):
+        """Aplica todas las fuerzas sobre las partículas activas.
+
+        Escribe directamente en sys.acceleration[s]. Los arrays temporales
+        están preasignados para evitar allocaciones en cada frame.
+        """
+        n = sys.n
+        pos = sys.position[s]
+
+        # Masa como columna para broadcast: (n, 1)
+        mass_col = _scratch_mass_col[:n]
+        mass_col[:, 0] = sys.mass[:n]
+
+        # 1. Gravedad
+        sys.acceleration[:n, 1] += -98.0
+
         # 2. Viento oscilante
-        wind_force = np.array([20 * np.sin(time * 0.5), 0], dtype=np.float32)
-        particle.apply_force(wind_force)
-        
-        # 3. Turbulencia aleatoria
-        turbulence = np.random.uniform(-10, 10, 2).astype(np.float32)
-        particle.apply_force(turbulence)
-        
-        # 4. Repulsión de los bordes
-        width, height = boundaries
-        edge_margin = 50
-        
-        # Calculamos distancias a los bordes
-        dist_left = particle.position[0]
-        dist_right = width - particle.position[0]
-        dist_bottom = particle.position[1]
-        dist_top = height - particle.position[1]
-        
-        # Creamos vector de repulsión
-        repulsion = np.zeros(2, dtype=np.float32)
-        
-        # Aplicamos repulsión si está cerca de los bordes
-        if dist_left < edge_margin:
-            repulsion[0] += 5 * (edge_margin - dist_left)
-        elif dist_right < edge_margin:
-            repulsion[0] -= 5 * (edge_margin - dist_right)
-            
-        if dist_bottom < edge_margin:
-            repulsion[1] += 5 * (edge_margin - dist_bottom)
-        elif dist_top < edge_margin:
-            repulsion[1] -= 5 * (edge_margin - dist_top)
-            
-        particle.apply_force(repulsion)
+        sys.acceleration[:n, 0] += 20 * np.sin(time * 0.5)
 
-    def handle_boundary_collisions(particle):
-        """Función para manejar colisiones con los límites de la ventana."""
-        width, height = boundaries
-        
-        # Colisiones en X
-        if particle.position[0] < 0:
-            particle.position[0] = 0
-            particle.velocity[0] *= -0.7  # Amortiguación
-        elif particle.position[0] > width:
-            particle.position[0] = width
-            particle.velocity[0] *= -0.7
-            
-        # Colisiones en Y
-        if particle.position[1] < 0:
-            particle.position[1] = 0
-            particle.velocity[1] *= -0.6  # Más amortiguación para el suelo
-        elif particle.position[1] > height:
-            particle.position[1] = height
-            particle.velocity[1] *= -0.7
+        # 3. Turbulencia aleatoria (in-place en scratch)
+        turb = _scratch_turbulence[:n]
+        _rng.random(size=(n, 2), dtype=np.float32, out=turb)
+        turb *= 20.0   # escalar [0,1) -> [0,20)
+        turb -= 10.0   # desplazar -> [-10, 10)
+        turb /= mass_col
+        sys.acceleration[s] += turb
+
+        # 4. Repulsión de bordes
+        repulsion = _scratch_repulsion[:n]
+        repulsion[:] = 0
+
+        dist_left = pos[:, 0]
+        dist_right = width - pos[:, 0]
+        dist_bottom = pos[:, 1]
+        dist_top = height - pos[:, 1]
+
+        edge_margin = 50.0
+
+        mask = dist_left < edge_margin
+        repulsion[mask, 0] += 5 * (edge_margin - dist_left[mask])
+        mask = dist_right < edge_margin
+        repulsion[mask, 0] -= 5 * (edge_margin - dist_right[mask])
+        mask = dist_bottom < edge_margin
+        repulsion[mask, 1] += 5 * (edge_margin - dist_bottom[mask])
+        mask = dist_top < edge_margin
+        repulsion[mask, 1] -= 5 * (edge_margin - dist_top[mask])
+
+        repulsion /= mass_col
+        sys.acceleration[s] += repulsion
+
+    # %% Colisiones con los bordes
+
+    def handle_boundary_collisions():
+        n = system.n
+        if n == 0:
+            return
+
+        pos = system.position[:n]
+        vel = system.velocity[:n]
+
+        # X
+        mask = pos[:, 0] < 0
+        pos[mask, 0] = 0
+        vel[mask, 0] *= -0.7
+
+        mask = pos[:, 0] > width
+        pos[mask, 0] = width
+        vel[mask, 0] *= -0.7
+
+        # Y
+        mask = pos[:, 1] < 0
+        pos[mask, 1] = 0
+        vel[mask, 1] *= -0.6
+
+        mask = pos[:, 1] > height
+        pos[mask, 1] = height
+        vel[mask, 1] *= -0.7
+
+    # %% Eventos
 
     @win.event
     def on_draw():
@@ -127,79 +180,41 @@ def particulas(width, height, max_ttl, emission_rate):
 
         pipeline.use()
 
-        if particle_data is not None:
-            particle_data.draw(pyglet.gl.GL_POINTS)
+        particle_data.draw(pyglet.gl.GL_POINTS)
 
     @win.event
     def on_mouse_motion(x, y, dx, dy):
         nonlocal last_mouse_pos
-        # Actualizar posición del mouse
         last_mouse_pos = np.array([x, y], dtype=np.float32)
-        
-        # Emitir algunas partículas al mover el mouse
-        for _ in range(2):
-            # Variación en la posición
-            jitter = np.random.uniform(-10, 10, 2).astype(np.float32)
-            pos = last_mouse_pos + jitter
-            particles.append(create_particle(pos))
+        emit_batch(2, last_mouse_pos)
 
     def emit_particles(dt, win):
-        # Emitir continuamente partículas
-        for _ in range(emission_rate):
-            # Variación en la posición
-            jitter = np.random.uniform(-15, 15, 2).astype(np.float32)
-            pos = last_mouse_pos + jitter
-            particles.append(create_particle(pos))
+        emit_batch(emission_rate, last_mouse_pos)
 
     def update_particle_system(dt, win):
-        # Incrementar tiempo global
-        nonlocal time, particle_data
+        nonlocal time
         time += dt
-        
-        # Actualizar todas las partículas
-        for particle in particles:
-            # Actualizar estado físico
-            particle.update(dt, apply_forces)
-            
-            # Manejar colisiones con los límites
-            handle_boundary_collisions(particle)
-        
-        # Eliminar partículas muertas
-        while particles and not particles[0].alive:
-            particles.popleft()
-        
-        # Limitar número máximo de partículas
-        max_particles = 500
-        while len(particles) > max_particles:
-            particles.popleft()
-        
-        # Actualizar datos en GPU
-        if particle_data is not None:
-            particle_data.delete()
-            particle_data = None
-        
-        num_particles = len(particles)
-        if num_particles > 0:
-            # Crear vertex_list
-            particle_data = pipeline.vertex_list(
-                num_particles, pyglet.gl.GL_POINTS, position="f", ttl="f"
-            )
-            
-            # Preparar datos de manera optimizada
-            positions = np.zeros(num_particles * 2, dtype=np.float32)
-            ttls = np.zeros(num_particles, dtype=np.float32)
-            
-            # Llenar arrays de manera optimizada
-            for i, p in enumerate(particles):
-                positions[i*2:i*2+2] = p.position
-                ttls[i] = p.ttl
-            
-            # Enviar a GPU
-            particle_data.position[:] = positions
-            particle_data.ttl[:] = ttls
 
-    # Programar actualización y emisión
+        # Integración vectorizada + compactación
+        step(dt, apply_forces)
+        handle_boundary_collisions()
+
+        # Enviar datos a GPU (sin recrear buffers)
+        n = system.n
+        if n > 0:
+            particle_data.position[:n * 2] = system.positions_flat()
+            particle_data.ttl[:n] = system.ttls_flat()
+
+        # Los slots restantes quedan con ttl <= 0, así el shader los oculta
+        if n < max_particles:
+            particle_data.ttl[n:] = _zero_ttl[:max_particles - n]
+
+    # %% Inicio
+
     pyglet.clock.schedule(emit_particles, win)
     pyglet.clock.schedule(update_particle_system, win)
-    
+
+    print(f"Partículas (máx {max_particles}, integrador: {integrator})")
+    print("Mueve el mouse para emitir partículas")
+
     pyglet.app.run()

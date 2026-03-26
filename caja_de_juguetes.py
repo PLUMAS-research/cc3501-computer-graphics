@@ -133,5 +133,13 @@ from examples.buddhabrot import buddhabrot
 
 grafica_cli.add_command(buddhabrot)
 
+from examples.flappy_redpanda.app import flappy_redpanda
+
+grafica_cli.add_command(flappy_redpanda)
+
+from examples.edo_case_studies import edo_case_studies
+
+grafica_cli.add_command(edo_case_studies)
+
 if __name__ == "__main__":
     grafica_cli()

@@ -141,5 +141,13 @@ from examples.edo_case_studies import edo_case_studies
 
 grafica_cli.add_command(edo_case_studies)
 
+from examples.quadtree import quadtree_demo
+
+grafica_cli.add_command(quadtree_demo)
+
+from examples.rasterizer import rasterizer
+
+grafica_cli.add_command(rasterizer)
+
 if __name__ == "__main__":
     grafica_cli()

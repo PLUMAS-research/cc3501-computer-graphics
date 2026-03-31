@@ -73,8 +73,8 @@ class Boid(mesa.Agent):
             velocity_norm = np.linalg.norm(self.velocity)
             
         self.velocity /= velocity_norm
-        self.current_speed = velocity_norm
-        
+        self.current_speed = min(velocity_norm, self.speed)
+
         new_pos = self.pos + self.velocity * self.current_speed
 
         new_pos[0] = np.clip(new_pos[0], 0, self.model.space.x_max)

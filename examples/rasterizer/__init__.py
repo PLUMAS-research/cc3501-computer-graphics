@@ -311,9 +311,12 @@ def rasterizer(width, height, resolution):
 
         draw_hud()
 
+    pyglet.font.add_file(
+        str(Path(__file__).parent.parent.parent / "assets" / "FiraCode" / "FiraCode-Regular.ttf")
+    )
     hud_label = pyglet.text.Label(
         "",
-        font_name="monospace",
+        font_name="FiraCode",
         font_size=11,
         x=10,
         y=height - 20,

@@ -71,28 +71,31 @@ def rasterize_triangle(buffer, v1, v2, v3, c1, c2, c3, mode="color"):
             )
 
 
-def draw_grid_on_buffer(buffer, grid_color=(40, 40, 40)):
-    """Dibuja lineas de grilla para visualizar los pixeles individuales."""
-    h, w = buffer.shape[:2]
-    # solo dibujar grilla si la resolucion es baja (pixeles visibles)
-    if w > 128 or h > 128:
-        return
-    # lineas horizontales
-    for y in range(h):
-        buffer[y, :] = np.where(
-            buffer[y, :].astype(int) > 30,
-            np.clip(buffer[y, :].astype(int) - 30, 0, 255).astype(np.uint8),
-            buffer[y, :],
+def build_grid_lines(raster_w, raster_h, win_width, win_height):
+    """Construye una lista de pyglet.shapes.Line para la grilla en pantalla.
+
+    Solo se construye si la resolucion es baja (pixeles visibles).
+    """
+    if raster_w > 128 or raster_h > 128:
+        return [], None
+
+    batch = pyglet.graphics.Batch()
+    lines = []
+    cell_w = win_width / raster_w
+    cell_h = win_height / raster_h
+
+    for i in range(raster_w + 1):
+        x = round(i * cell_w)
+        lines.append(
+            pyglet.shapes.Line(x, 0, x, win_height, color=(80, 80, 80, 160), batch=batch)
         )
-    # en realidad, marcamos el borde inferior de cada pixel
-    # oscurecemos ligeramente los bordes
-    for y in range(0, h):
-        for x in range(w):
-            # borde inferior y borde izquierdo de cada pixel
-            if y == 0 or x == 0:
-                buffer[y, x] = np.clip(
-                    buffer[y, x].astype(int) - 50, 0, 255
-                ).astype(np.uint8)
+    for j in range(raster_h + 1):
+        y = round(j * cell_h)
+        lines.append(
+            pyglet.shapes.Line(0, y, win_width, y, color=(80, 80, 80, 160), batch=batch)
+        )
+
+    return lines, batch
 
 
 @click.command(
@@ -127,6 +130,8 @@ def rasterizer(width, height, resolution):
         "raster_w": raster_w,
         "raster_h": raster_h,
         "needs_update": True,
+        "grid_batch": None,
+        "grid_lines": [],
     }
 
     # dos triangulos con vertices en coordenadas de raster
@@ -198,9 +203,6 @@ def rasterizer(width, height, resolution):
                 mode=state["mode"],
             )
 
-        if state["show_grid"]:
-            draw_grid_on_buffer(buffer)
-
         # marcar los vertices con un punto
         for tri in triangles:
             for vx, vy in tri["vertices"]:
@@ -214,12 +216,20 @@ def rasterizer(width, height, resolution):
         rw = state["raster_w"]
         rh = state["raster_h"]
         GL.glBindTexture(GL.GL_TEXTURE_2D, texture_id)
+        GL.glPixelStorei(GL.GL_UNPACK_ALIGNMENT, 1)
         GL.glTexImage2D(
             GL.GL_TEXTURE_2D, 0, GL.GL_RGB,
             rw, rh, 0,
             GL.GL_RGB, GL.GL_UNSIGNED_BYTE,
             buffer.tobytes(),
         )
+
+    def rebuild_grid():
+        lines, batch = build_grid_lines(
+            state["raster_w"], state["raster_h"], width, height
+        )
+        state["grid_lines"] = lines
+        state["grid_batch"] = batch
 
     def window_to_raster(wx, wy):
         """Convierte coordenadas de ventana a coordenadas de raster."""
@@ -251,6 +261,7 @@ def rasterizer(width, height, resolution):
         elif symbol == pyglet.window.key.G:
             state["show_grid"] = not state["show_grid"]
             state["needs_update"] = True
+            rebuild_grid()
         elif symbol == pyglet.window.key.PLUS or symbol == pyglet.window.key.EQUAL:
             new_w = min(256, state["raster_w"] + 10)
             rescale_vertices(state["raster_w"], state["raster_h"], new_w)
@@ -268,6 +279,7 @@ def rasterizer(width, height, resolution):
                 v[1] = v[1] / old_h * new_h
         state["raster_w"] = new_w
         state["raster_h"] = new_h
+        rebuild_grid()
 
     @window.event
     def on_mouse_press(x, y, button, modifiers):
@@ -309,7 +321,12 @@ def rasterizer(width, height, resolution):
 
         gpu_quad.draw(GL.GL_TRIANGLES)
 
+        if state["show_grid"] and state["grid_batch"] is not None:
+            state["grid_batch"].draw()
+
         draw_hud()
+
+    rebuild_grid()
 
     pyglet.font.add_file(
         str(Path(__file__).parent.parent.parent / "assets" / "FiraCode" / "FiraCode-Regular.ttf")

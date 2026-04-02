@@ -1,103 +1,162 @@
+import os
+from pathlib import Path
+
+import click
+import numpy as np
 import pyglet
 import pyglet.gl as GL
 import trimesh as tm
-import numpy as np
-import os
-import click
-from pathlib import Path
 
-@click.command("hello_opengl", short_help='¡Hola, OpenGL!')
+from grafica.utils import load_pipeline
+
+
+@click.command("hello_opengl", short_help="¡Hola, OpenGL!")
 @click.option("--width", type=int, default=960)
 @click.option("--height", type=int, default=960)
 def hola_opengl(width, height):
     window = pyglet.window.Window(width, height)
 
-    # cargaremos el modelo del conejo de Stanford.
-    # esta es la versión descargable desde Wikipedia
-    # el formato STL es binario!
-    bunny = tm.load("assets/Stanford_Bunny.stl")
-
-    # no sabemos de qué tamaño es el conejo.
-    # y solo podemos dibujar en nuestro cubo de referencia
-    # cuyas esquinas son [-1, -1, -1] y [1, 1, 1]
-    # trimesh nos facilita manipular la geometría del modelo 3D
-    # en este caso:
-    # 1) lo movemos hacia el origen, es decir, le restamos el centroide
-    bunny.apply_translation(-bunny.centroid)
-    # 2) puede ser que sea muy grande (o muy pequeño) para verse en la ventana.
-    # así que lo escalamos de acuerdo al tamaño
-    # (de acuerdo a la documentación de trimesh, el valor scale es el largo de la arista
-    # más grande de la caja que contiene al conejo)
-    bunny.apply_scale(2.0 / bunny.scale)
-
-    # el shader de vértices solo lee la posición de cada vértice
-    # cada vértice es pintado de color blanco en este shader.
-    with open(Path(os.path.dirname(__file__)) / "vertex_program.glsl") as f:
-        vertex_source_code = f.read()
-
-    # y el shader de píxeles solo lee el color correspondiente al píxel
-    with open(Path(os.path.dirname(__file__)) / "fragment_program.glsl") as f:
-        fragment_source_code = f.read()
-
-    vert_shader = pyglet.graphics.shader.Shader(vertex_source_code, "vertex")
-    frag_shader = pyglet.graphics.shader.Shader(fragment_source_code, "fragment")
-    pipeline = pyglet.graphics.shader.ShaderProgram(vert_shader, frag_shader)
-
-    # ahora le entregaremos los datos de nuestro objeto a la GPU
-    # afortunadamente trimesh tiene una función que convierte el modelo 3D
-    # a la representación adecuada para uso con OpenGL :)
-    bunny_vertex_list = tm.rendering.mesh_to_vertexlist(bunny)
-
-    # queremos dibujar al conejo con nuestro pipeline.
-    # como dibujarlo dependerá de lo que contenga cada shader del pipeline,
-    # tenemos que pedirle al pipeline que reserve espacio en la GPU
-    # para copiar nuestro conejo a la memoria gráfica
-    bunny_gpu = pipeline.vertex_list_indexed(
-        # ¿cuántos vértices contiene? 
-        # su quinto elemento contiene el tipo y las posiciones de los vértices.
-        # vertex_list[4][0] es vec3f (sabemos que es una posición en 3D de punto flotante)
-        # vertex_list[4][1] contiene las posiciones (x, y, z) de cada vértice
-        # todas concatenadas en una única lista.
-        # por eso el total de vértices es el largo de la lista dividido por 3.
-        len(bunny_vertex_list[4][1]) // 3,
-        # ¿cómo se dibujarán? en este caso, como triángulos
-        GL.GL_TRIANGLES,
-        # su cuarto elemento contiene los índices de los vértices, es decir,
-        # cuales vértices de la lista conforman cada triángulo
-        bunny_vertex_list[3]
+    pyglet.font.add_file(
+        str(
+            Path(__file__).parent.parent.parent
+            / "assets"
+            / "FiraCode"
+            / "FiraCode-Regular.ttf"
+        )
     )
 
-    # en el código anterior no se copió la información a la GPU,
-    # sino que se reservó espacio en la memoria para almacenar esos datos.
-    # aquí los copiamos: directamente asignamos nuestra lista de vértices
-    # al contenido del atributo position que recibe el pipeline.
-    # este atributo se recibe a nivel de vértice
-    # más adelante veremos que hay otro
+    # cargamos el conejo de Stanford (formato STL binario)
+    bunny = tm.load("assets/Stanford_Bunny.stl")
+
+    # lo centramos en el origen y lo normalizamos para que quepa en [-1, 1]^3
+    bunny.apply_translation(-bunny.centroid)
+    bunny.apply_scale(2.0 / bunny.scale)
+
+    pipeline = load_pipeline(
+        Path(os.path.dirname(__file__)) / "vertex_program.glsl",
+        Path(os.path.dirname(__file__)) / "fragment_program.glsl",
+    )
+
+    bunny_vertex_list = tm.rendering.mesh_to_vertexlist(bunny)
+    bunny_gpu = pipeline.vertex_list_indexed(
+        len(bunny_vertex_list[4][1]) // 3, GL.GL_TRIANGLES, bunny_vertex_list[3]
+    )
     bunny_gpu.position[:] = bunny_vertex_list[4][1]
 
-    # GAME LOOP
+    # pipeline simple para dibujar el cuadro que representa el volumen normalizado.
+    # sus vértices se especifican directamente en coordenadas NDC reales,
+    # por eso no necesita uniforms.
+    box_vert_src = """
+#version 330
+in vec3 position;
+void main() {
+    gl_Position = vec4(position, 1.0);
+}
+"""
+    box_frag_src = """
+#version 330
+out vec4 outColor;
+void main() {
+    outColor = vec4(0.9, 0.8, 0.2, 1.0);
+}
+"""
+    box_vert = pyglet.graphics.shader.Shader(box_vert_src, "vertex")
+    box_frag = pyglet.graphics.shader.Shader(box_frag_src, "fragment")
+    box_pipeline = pyglet.graphics.shader.ShaderProgram(box_vert, box_frag)
+
+    # el cuadro se dibuja en las coordenadas NDC reales donde termina el volumen
+    # simulado, es decir, en ±VIEWPORT_SCALE
+    VIEWPORT_SCALE = 0.85
+    v = VIEWPORT_SCALE
+    box_vertices = np.array(
+        [
+            -v,
+            -v,
+            0.0,
+            v,
+            -v,
+            0.0,
+            v,
+            v,
+            0.0,
+            -v,
+            v,
+            0.0,
+        ],
+        dtype=np.float32,
+    )
+    box_gpu = box_pipeline.vertex_list(4, GL.GL_LINE_LOOP)
+    box_gpu.position[:] = box_vertices
+
+    # estado de la animación e interacción
+    state = {
+        "angle": 0.0,
+        "object_scale": 1.0,
+        "clip_enabled": True,
+        "rotating": True,
+    }
+
+    label = pyglet.text.Label(
+        "+/-: escala   C: clipping   ESPACIO: pausa   R: reset",
+        font_name="FiraCode",
+        font_size=13,
+        x=width // 2,
+        y=12,
+        anchor_x="center",
+        anchor_y="bottom",
+        color=(200, 200, 200, 255),
+    )
+
     @window.event
     def on_draw():
-        # esta función define el color con el que queda una ventana vacía
-        # noten que esto es algo de OpenGL, no de pyglet
-        GL.glClearColor(0.5, 0.5, 0.5, 1.0)
-        # GL_LINE => Wireframe
-        # GL_FILL => pinta el interior de cada triángulo
+        GL.glClearColor(0.1, 0.1, 0.1, 1.0)
         GL.glPolygonMode(GL.GL_FRONT_AND_BACK, GL.GL_LINE)
         GL.glLineWidth(1.0)
-
-        # lo anterior no ejecuta esos cambios en la ventana,
-        # más bien, configura OpenGL para cuando se ejecuten instrucciones
-        # como la siguiente:
         window.clear()
 
-        # del mismo modo, activamos el pipeline
-        # activarlo no implica graficar nada de manera inmediata
-        pipeline.use()
-        # hasta que le pedimos a bunny_gpu que grafique sus triángulos
-        # utilizando el pipeline activo
-        bunny_gpu.draw(pyglet.gl.GL_TRIANGLES)
+        # cuadro del volumen normalizado simulado
+        box_pipeline.use()
+        box_gpu.draw(GL.GL_LINE_LOOP)
 
-    # aquí comienza pyglet a ejecutar su loop.
+        # conejo con rotación, escala y clipping simulado
+        pipeline.use()
+        pipeline["angle"] = state["angle"]
+        pipeline["object_scale"] = state["object_scale"]
+        pipeline["viewport_scale"] = VIEWPORT_SCALE
+        pipeline["clip_enabled"] = 1 if state["clip_enabled"] else 0
+        bunny_gpu.draw(GL.GL_TRIANGLES)
+
+        # el label usa renderizado 2D de pyglet; restauramos el modo de polígonos
+        GL.glPolygonMode(GL.GL_FRONT_AND_BACK, GL.GL_FILL)
+        label.draw()
+
+    def on_update(dt):
+        if state["rotating"]:
+            state["angle"] += dt * 0.8  # ~0.8 rad/s
+
+    pyglet.clock.schedule_interval(on_update, 1 / 60)
+
+    @window.event
+    def on_key_press(symbol, modifiers):
+        # aumentar escala: el conejo sale del cubo y se ve el clipping
+        if symbol in (
+            pyglet.window.key.PLUS,
+            pyglet.window.key.EQUAL,
+            pyglet.window.key.NUM_ADD,
+        ):
+            state["object_scale"] = min(state["object_scale"] + 0.1, 2.5)
+        # reducir escala
+        elif symbol in (pyglet.window.key.MINUS, pyglet.window.key.NUM_SUBTRACT):
+            state["object_scale"] = max(state["object_scale"] - 0.1, 0.2)
+        # activar / desactivar el clipping simulado
+        elif symbol == pyglet.window.key.C:
+            state["clip_enabled"] = not state["clip_enabled"]
+        # pausar / reanudar la rotación
+        elif symbol == pyglet.window.key.SPACE:
+            state["rotating"] = not state["rotating"]
+        # volver al estado inicial
+        elif symbol == pyglet.window.key.R:
+            state["object_scale"] = 1.0
+            state["angle"] = 0.0
+
     pyglet.app.run()
-    # ¡cuando ejecutemos el programa veremos al conejo en Wireframe!

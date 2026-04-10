@@ -10,37 +10,37 @@ from OpenGL import GL
 from grafica.utils import load_pipeline
 
 
-def compute_trajectories(num_samples, max_iter, re_min, re_max, im_min, im_max):
+def compute_trajectories(num_samples, max_iter, real_min, real_max, imag_min, imag_max):
     """Calcula trayectorias de Mandelbrot y retorna los puntos que escapan.
 
     Retorna un array de coordenadas NDC (Normalized Device Coordinates)
     en el rango [-1, 1], listas para enviar a la GPU.
     """
     # Generar puntos c aleatorios en el plano complejo
-    c_re = np.random.uniform(re_min, re_max, num_samples)
-    c_im = np.random.uniform(im_min, im_max, num_samples)
+    seed_real = np.random.uniform(real_min, real_max, num_samples)
+    seed_imag = np.random.uniform(imag_min, imag_max, num_samples)
 
-    z_re = np.zeros(num_samples, dtype=np.float64)
-    z_im = np.zeros(num_samples, dtype=np.float64)
+    orbit_real = np.zeros(num_samples, dtype=np.float64)
+    orbit_imag = np.zeros(num_samples, dtype=np.float64)
 
     # Guardar trayectorias (max_iter x num_samples)
-    traj_re = np.zeros((max_iter, num_samples), dtype=np.float64)
-    traj_im = np.zeros((max_iter, num_samples), dtype=np.float64)
+    trajectory_real = np.zeros((max_iter, num_samples), dtype=np.float64)
+    trajectory_imag = np.zeros((max_iter, num_samples), dtype=np.float64)
 
     active = np.ones(num_samples, dtype=bool)
     escaped = np.zeros(num_samples, dtype=bool)
     escape_iter = np.full(num_samples, max_iter, dtype=np.int32)
 
     for i in range(max_iter):
-        traj_re[i] = z_re
-        traj_im[i] = z_im
+        trajectory_real[i] = orbit_real
+        trajectory_imag[i] = orbit_imag
 
-        z_re_new = z_re * z_re - z_im * z_im + c_re
-        z_im_new = 2.0 * z_re * z_im + c_im
-        z_re, z_im = z_re_new, z_im_new
+        next_real = orbit_real * orbit_real - orbit_imag * orbit_imag + seed_real
+        next_imag = 2.0 * orbit_real * orbit_imag + seed_imag
+        orbit_real, orbit_imag = next_real, next_imag
 
-        r2 = z_re * z_re + z_im * z_im
-        just_escaped = active & (r2 > 4.0)
+        radius_squared = orbit_real * orbit_real + orbit_imag * orbit_imag
+        just_escaped = active & (radius_squared > 4.0)
         if np.any(just_escaped):
             escaped |= just_escaped
             escape_iter[just_escaped] = i + 1
@@ -55,19 +55,21 @@ def compute_trajectories(num_samples, max_iter, re_min, re_max, im_min, im_max):
         return np.empty((0, 2), dtype=np.float32)
 
     all_points = []
-    for idx in escaped_indices:
-        n = escape_iter[idx]
-        re_pts = traj_re[:n, idx]
-        im_pts = traj_im[:n, idx]
+    for sample_index in escaped_indices:
+        num_orbit_steps = escape_iter[sample_index]
+        orbit_real_points = trajectory_real[:num_orbit_steps, sample_index]
+        orbit_imag_points = trajectory_imag[:num_orbit_steps, sample_index]
 
         # Filtrar puntos dentro del rango visible
-        mask = ((re_pts >= re_min) & (re_pts <= re_max) &
-                (im_pts >= im_min) & (im_pts <= im_max))
-        re_pts = re_pts[mask]
-        im_pts = im_pts[mask]
+        visible_mask = (
+            (orbit_real_points >= real_min) & (orbit_real_points <= real_max) &
+            (orbit_imag_points >= imag_min) & (orbit_imag_points <= imag_max)
+        )
+        orbit_real_points = orbit_real_points[visible_mask]
+        orbit_imag_points = orbit_imag_points[visible_mask]
 
-        if len(re_pts) > 0:
-            all_points.append(np.column_stack([re_pts, im_pts]))
+        if len(orbit_real_points) > 0:
+            all_points.append(np.column_stack([orbit_real_points, orbit_imag_points]))
 
     if not all_points:
         return np.empty((0, 2), dtype=np.float32)
@@ -75,10 +77,10 @@ def compute_trajectories(num_samples, max_iter, re_min, re_max, im_min, im_max):
     points = np.vstack(all_points)
 
     # Convertir de coordenadas del plano complejo a NDC [-1, 1]
-    ndc_x = 2.0 * (points[:, 0] - re_min) / (re_max - re_min) - 1.0
-    ndc_y = 2.0 * (points[:, 1] - im_min) / (im_max - im_min) - 1.0
+    normalized_x = 2.0 * (points[:, 0] - real_min) / (real_max - real_min) - 1.0
+    normalized_y = 2.0 * (points[:, 1] - imag_min) / (imag_max - imag_min) - 1.0
 
-    return np.column_stack([ndc_x, ndc_y]).astype(np.float32)
+    return np.column_stack([normalized_x, normalized_y]).astype(np.float32)
 
 
 @click.command("buddhabrot", short_help="Buddhabrot: fractales por acumulación en GPU")
@@ -104,16 +106,16 @@ def buddhabrot(width, height, samples, max_iter_r, max_iter_g, max_iter_b):
     """
 
     # Rango del plano complejo
-    re_min, re_max = -2.0, 1.0
-    im_min, im_max = -1.2, 1.2
+    real_min, real_max = -2.0, 1.0
+    imag_min, imag_max = -1.2, 1.2
 
-    win = pyglet.window.Window(width, height, caption="Buddhabrot")
+    window = pyglet.window.Window(width, height, caption="Buddhabrot")
 
     # --- Framebuffer de acumulación con textura float ---
     # Usamos GL_RGBA16F para tener suficiente rango dinámico.
     # Cada punto que pasa por un píxel suma 1.0 a su canal correspondiente.
-    accum_tex = GL.glGenTextures(1)
-    GL.glBindTexture(GL.GL_TEXTURE_2D, accum_tex)
+    accumulation_texture = GL.glGenTextures(1)
+    GL.glBindTexture(GL.GL_TEXTURE_2D, accumulation_texture)
     GL.glTexImage2D(
         GL.GL_TEXTURE_2D, 0, GL.GL_RGBA16F,
         width, height, 0,
@@ -124,16 +126,16 @@ def buddhabrot(width, height, samples, max_iter_r, max_iter_g, max_iter_b):
     GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL.GL_CLAMP_TO_EDGE)
     GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL.GL_CLAMP_TO_EDGE)
 
-    fbo = GL.glGenFramebuffers(1)
-    GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, fbo)
+    framebuffer = GL.glGenFramebuffers(1)
+    GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, framebuffer)
     GL.glFramebufferTexture2D(
         GL.GL_FRAMEBUFFER, GL.GL_COLOR_ATTACHMENT0,
-        GL.GL_TEXTURE_2D, accum_tex, 0
+        GL.GL_TEXTURE_2D, accumulation_texture, 0
     )
     # Verificar que el framebuffer esté completo
-    status = GL.glCheckFramebufferStatus(GL.GL_FRAMEBUFFER)
-    if status != GL.GL_FRAMEBUFFER_COMPLETE:
-        print(f"Error: framebuffer incompleto (status={status})")
+    framebuffer_status = GL.glCheckFramebufferStatus(GL.GL_FRAMEBUFFER)
+    if framebuffer_status != GL.GL_FRAMEBUFFER_COMPLETE:
+        print(f"Error: framebuffer incompleto (status={framebuffer_status})")
     # Limpiar el framebuffer
     GL.glClearColor(0.0, 0.0, 0.0, 0.0)
     GL.glClear(GL.GL_COLOR_BUFFER_BIT)
@@ -146,18 +148,18 @@ def buddhabrot(width, height, samples, max_iter_r, max_iter_g, max_iter_b):
     )
 
     # VAO y VBO para los puntos (se actualiza cada frame)
-    vao_points = GL.glGenVertexArrays(1)
-    vbo_points = GL.glGenBuffers(1)
+    vertex_array_points = GL.glGenVertexArrays(1)
+    vertex_buffer_points = GL.glGenBuffers(1)
 
-    GL.glBindVertexArray(vao_points)
-    GL.glBindBuffer(GL.GL_ARRAY_BUFFER, vbo_points)
-    pos_loc = GL.glGetAttribLocation(pipeline_points.id, "position")
-    GL.glEnableVertexAttribArray(pos_loc)
-    GL.glVertexAttribPointer(pos_loc, 2, GL.GL_FLOAT, GL.GL_FALSE, 0, ctypes.c_void_p(0))
+    GL.glBindVertexArray(vertex_array_points)
+    GL.glBindBuffer(GL.GL_ARRAY_BUFFER, vertex_buffer_points)
+    position_attribute_location = GL.glGetAttribLocation(pipeline_points.id, "position")
+    GL.glEnableVertexAttribArray(position_attribute_location)
+    GL.glVertexAttribPointer(position_attribute_location, 2, GL.GL_FLOAT, GL.GL_FALSE, 0, ctypes.c_void_p(0))
     GL.glBindVertexArray(0)
 
     # --- Pipeline de visualización ---
-    pipeline_vis = load_pipeline(
+    pipeline_visualization = load_pipeline(
         Path(os.path.dirname(__file__)) / "vertex_program.glsl",
         Path(os.path.dirname(__file__)) / "visualization.glsl",
     )
@@ -167,9 +169,9 @@ def buddhabrot(width, height, samples, max_iter_r, max_iter_g, max_iter_b):
     uv = np.array([0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0], dtype=np.float32)
     indices = np.array([0, 1, 2, 2, 3, 0], dtype=np.uint32)
 
-    gpu_quad = pipeline_vis.vertex_list_indexed(4, GL.GL_TRIANGLES, indices)
-    gpu_quad.position[:] = vertices
-    gpu_quad.uv[:] = uv
+    screen_quad = pipeline_visualization.vertex_list_indexed(4, GL.GL_TRIANGLES, indices)
+    screen_quad.position[:] = vertices
+    screen_quad.uv[:] = uv
 
     # Estado
     paused = False
@@ -190,7 +192,7 @@ def buddhabrot(width, height, samples, max_iter_r, max_iter_g, max_iter_b):
         if len(points_ndc) == 0:
             return
 
-        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, vbo_points)
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, vertex_buffer_points)
         GL.glBufferData(
             GL.GL_ARRAY_BUFFER,
             points_ndc.nbytes,
@@ -201,28 +203,29 @@ def buddhabrot(width, height, samples, max_iter_r, max_iter_g, max_iter_b):
         pipeline_points.use()
         pipeline_points['channel_color'] = color
 
-        GL.glBindVertexArray(vao_points)
+        GL.glBindVertexArray(vertex_array_points)
         GL.glDrawArrays(GL.GL_POINTS, 0, len(points_ndc))
         GL.glBindVertexArray(0)
 
-    def tick(dt):
+    def tick(delta_time):
         nonlocal frame_count, total_samples
 
         if paused:
             return
 
         # --- Paso de acumulación: renderizar puntos al framebuffer ---
-        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, fbo)
+        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, framebuffer)
         GL.glViewport(0, 0, width, height)
         GL.glEnable(GL.GL_BLEND)
         GL.glBlendFunc(GL.GL_ONE, GL.GL_ONE)  # blending aditivo
 
-        for name, max_iter, color, ratio in channels:
-            n = max(100, int(current_samples * ratio))
+        for channel_name, channel_max_iter, channel_color, sample_ratio in channels:
+            channel_sample_count = max(100, int(current_samples * sample_ratio))
             points = compute_trajectories(
-                n, max_iter, re_min, re_max, im_min, im_max
+                channel_sample_count, channel_max_iter,
+                real_min, real_max, imag_min, imag_max
             )
-            render_points(points, color)
+            render_points(points, channel_color)
 
         GL.glDisable(GL.GL_BLEND)
         GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
@@ -234,7 +237,7 @@ def buddhabrot(width, height, samples, max_iter_r, max_iter_g, max_iter_b):
             print(f"Frame {frame_count}: {total_samples:,} muestras, "
                   f"exposición={exposure:.4f}")
 
-    @win.event
+    @window.event
     def on_key_press(symbol, modifiers):
         nonlocal paused, current_samples, exposure, total_samples, frame_count
 
@@ -243,7 +246,7 @@ def buddhabrot(width, height, samples, max_iter_r, max_iter_g, max_iter_b):
             print("Pausado" if paused else "Reanudado")
         elif symbol == pyglet.window.key.R:
             # Limpiar framebuffer de acumulación
-            GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, fbo)
+            GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, framebuffer)
             GL.glClearColor(0.0, 0.0, 0.0, 0.0)
             GL.glClear(GL.GL_COLOR_BUFFER_BIT)
             GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
@@ -263,27 +266,27 @@ def buddhabrot(width, height, samples, max_iter_r, max_iter_g, max_iter_b):
             exposure /= 2.0
             print(f"Exposición: {exposure:.6f}")
 
-    @win.event
+    @window.event
     def on_draw():
-        win.clear()
+        window.clear()
         GL.glViewport(0, 0, width, height)
 
         # --- Paso de visualización ---
         # Leer la textura de acumulación y aplicar tone mapping
-        pipeline_vis.use()
+        pipeline_visualization.use()
 
         GL.glActiveTexture(GL.GL_TEXTURE0)
-        GL.glBindTexture(GL.GL_TEXTURE_2D, accum_tex)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, accumulation_texture)
 
-        sampler_loc = GL.glGetUniformLocation(pipeline_vis.id, "accum_tex")
-        if sampler_loc != -1:
-            GL.glUniform1i(sampler_loc, 0)
+        sampler_uniform_location = GL.glGetUniformLocation(pipeline_visualization.id, "accum_tex")
+        if sampler_uniform_location != -1:
+            GL.glUniform1i(sampler_uniform_location, 0)
 
-        exposure_loc = GL.glGetUniformLocation(pipeline_vis.id, "exposure")
-        if exposure_loc != -1:
-            GL.glUniform1f(exposure_loc, exposure)
+        exposure_uniform_location = GL.glGetUniformLocation(pipeline_visualization.id, "exposure")
+        if exposure_uniform_location != -1:
+            GL.glUniform1f(exposure_uniform_location, exposure)
 
-        gpu_quad.draw(GL.GL_TRIANGLES)
+        screen_quad.draw(GL.GL_TRIANGLES)
 
     print("Buddhabrot (Nebulabrot) con acumulación en GPU")
     print("Controles:")

@@ -105,6 +105,14 @@ from examples.transformations.app import transformed_bunny
 
 grafica_cli.add_command(transformed_bunny)
 
+from examples.spirograph import spirograph
+
+grafica_cli.add_command(spirograph)
+
+from examples.gimbal_lock import gimbal_lock
+
+grafica_cli.add_command(gimbal_lock)
+
 from examples.disco_bunny.app import disco_bunny
 
 grafica_cli.add_command(disco_bunny)

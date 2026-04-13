@@ -268,7 +268,7 @@ def boids_particles(n_pajaritos, width, height, spatial):
     )
     hud_label = pyglet.text.Label(
         "",
-        font_name="FiraCode",
+        font_name="Fira Code",
         font_size=11,
         x=10,
         y=height - 20,

@@ -236,7 +236,7 @@ def quadtree_demo(width, height, capacity, query_radius):
         str(Path(__file__).parent.parent.parent / "assets" / "FiraCode" / "FiraCode-Regular.ttf")
     )
     hud_label = pyglet.text.Label(
-        "", font_name="FiraCode", font_size=11,
+        "", font_name="Fira Code", font_size=11,
         x=10, y=height - 20,
         color=(80, 80, 80, 200),
         multiline=True, width=width - 20,

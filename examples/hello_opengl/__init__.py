@@ -98,7 +98,7 @@ void main() {
 
     label = pyglet.text.Label(
         "+/-: escala   C: clipping   ESPACIO: pausa   R: reset",
-        font_name="FiraCode",
+        font_name="Fira Code",
         font_size=13,
         x=width // 2,
         y=12,

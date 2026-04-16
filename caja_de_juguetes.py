@@ -121,6 +121,10 @@ from examples.camera_path import camera_path
 
 grafica_cli.add_command(camera_path)
 
+from examples.camera_frustum import camera_frustum
+
+grafica_cli.add_command(camera_frustum)
+
 from examples.pyvista_orbital import orbital
 
 grafica_cli.add_command(orbital)

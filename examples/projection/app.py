@@ -20,6 +20,10 @@ from .elementos import rectangulo, stanford_bunny, regular_grid
 def projection_example(width, height):
     window = pyglet.window.Window(width, height)
 
+    pyglet.font.add_file(str(
+        Path(__file__).parent.parent.parent / "assets" / "FiraCode" / "FiraCode-Regular.ttf"
+    ))
+
     # primer elemento: el rectángulo de fondo
     bg_rectangle = rectangulo()
 
@@ -38,20 +42,14 @@ def projection_example(width, height):
 
     # cargamos el shader que usaremos para graficar al conejo
     bunny_pipeline = load_pipeline(
-        Path(os.path.dirname(__file__)) / "mesh_vertex_program.glsl", 
+        Path(os.path.dirname(__file__)) / "normal_vertex_program.glsl",
         Path(os.path.dirname(__file__)) / ".." / "hello_world" / "fragment_program.glsl")
 
     bunny_gpu = bunny_pipeline.vertex_list_indexed(
         bunny['n_vertices'], bunny['gl_type'], bunny['indices']
     )
     bunny_gpu.position[:] = bunny['position']
-
-    # en este caso sabemos que trimesh nos entregó una "sopa de triángulos"
-    # donde algunos vértices se repiten. entonces, no podemos entregarle directamente
-    # la curvatura que hemos calculado.
-    # así que construimos la curvatura correspondiente a cada vértice de cada triángulo
-    # nos ayudamos de los índices de las caras (bunny.faces) y el método numpy.take
-    bunny_gpu.curvature[:] = bunny['curvature']
+    bunny_gpu.normal[:] = bunny['normal']
 
     # el tercer elemento es una grilla que graficaremos con GL_LINES (líneas)
     # nuevamente reusamos el fragment program. solo debemos cargar el vertex program
@@ -70,60 +68,74 @@ def projection_example(width, height):
 
     # agregamos la vista y la proyección a nuestro estado de programa
     total_time = 0.0
+    fov = 60.0
+
+    # Vistas y proyecciones
+    perspective_view = tr.lookAt(
+        np.array([-1.0, 0, 0.25]),
+        np.array([0, 0, 0.25]),
+        np.array([0.0, 0.0, 1.0]),
+    )
+    isometric_view = tr.lookAt(
+        np.array([-0.7, -0.7, 0.7]),
+        np.array([0, 0, 0.25]),
+        np.array([0.0, 0.0, 1.0]),
+    )
+    orthographic_projection = tr.ortho(-0.5, 0.5, -0.5, 0.5, 0.001, 5.0)
+
     transformations = {
-        # al conejo le aplicamos la identidad por ahora.
         "bunny": tr.identity(),
-        # nuestra grilla se define entre 0 y 1, movámosla para centrarla en el origen
         "grid": tr.translate(-0.5, -0.5, 0),
-        # transformación de la vista
-        "view": tr.lookAt(
-            np.array([-1.0, 0, 0.25]),  # posición de la cámara
-            np.array([0, 0, 0.25]),  # hacia dónde apunta
-            np.array([0.0, 0.0, 1.0]),  # vector para orientarla (arriba)
-        ),
-        # transformación de proyección, en este caso, en perspectiva
-        "projection": tr.perspective(60, width / height, 0.001, 5.0),
-        # Variable para controlar el tipo de proyección
+        "view": perspective_view,
+        "projection": tr.perspective(fov, width / height, 0.001, 5.0),
         "projection_type": "perspective",
     }
 
-    # Creamos las dos matrices de proyección que vamos a utilizar
-    perspective_projection = tr.perspective(60, width / height, 0.001, 5.0)
-    # Para la proyección isométrica usamos una matriz ortográfica
-    # Los parámetros son: izquierda, derecha, abajo, arriba, cerca, lejos
-    orthographic_projection = tr.ortho(-0.5, 0.5, -0.5, 0.5, 0.001, 5.0)
-    
-    # Modificamos la vista para la proyección isométrica cuando se active
-    # Una vista isométrica típica tiene ángulos iguales (120 grados) entre los ejes
-    isometric_view = tr.lookAt(
-        np.array([-0.7, -0.7, 0.7]),  # posición isométrica de la cámara
-        np.array([0, 0, 0.25]),        # hacia dónde apunta (mismo punto)
-        np.array([0.0, 0.0, 1.0])      # vector para orientarla (arriba)
-    )
-    
-    # Vista en perspectiva original
-    perspective_view = tr.lookAt(
-        np.array([-1.0, 0, 0.25]),     # posición de la cámara
-        np.array([0, 0, 0.25]),        # hacia dónde apunta
-        np.array([0.0, 0.0, 1.0])      # vector para orientarla (arriba)
-    )
+    def _draw_matrix(matrix, title, x, y, font_size=11):
+        """Dibuja título + matriz 4×4 alineados a la derecha en (x, y).
+        Devuelve la y del último elemento dibujado."""
+        line_height = font_size + 5
+        pyglet.text.Label(
+            title,
+            font_name="Fira Code", font_size=font_size,
+            x=x, y=y, anchor_x="right",
+            color=(200, 200, 200, 255),
+        ).draw()
+        for row_index in range(4):
+            row = matrix[row_index]
+            text = f"[{row[0]:7.3f} {row[1]:7.3f} {row[2]:7.3f} {row[3]:7.3f}]"
+            pyglet.text.Label(
+                text,
+                font_name="Fira Code", font_size=font_size,
+                x=x, y=y - (row_index + 1) * line_height,
+                anchor_x="right",
+                color=(160, 210, 160, 255),
+            ).draw()
+        return y - 5 * line_height
 
     @window.event
     def on_key_press(symbol, modifiers):
+        nonlocal fov
         if symbol == pyglet.window.key.P:
-            # Cambiamos entre proyección en perspectiva e isométrica
             if transformations["projection_type"] == "perspective":
                 transformations["projection"] = orthographic_projection
                 transformations["view"] = isometric_view
                 transformations["projection_type"] = "isometric"
             else:
-                transformations["projection"] = perspective_projection
+                transformations["projection"] = tr.perspective(fov, width / height, 0.001, 5.0)
                 transformations["view"] = perspective_view
                 transformations["projection_type"] = "perspective"
+        elif transformations["projection_type"] == "perspective":
+            if symbol in (pyglet.window.key.PLUS, pyglet.window.key.EQUAL):
+                fov = min(120.0, fov + 5.0)
+                transformations["projection"] = tr.perspective(fov, width / height, 0.001, 5.0)
+            elif symbol == pyglet.window.key.MINUS:
+                fov = max(10.0, fov - 5.0)
+                transformations["projection"] = tr.perspective(fov, width / height, 0.001, 5.0)
 
     @window.event
     def on_draw():
-        GL.glClearColor(0.5, 0.5, 0.5, 1.0)
+        GL.glClearColor(0.06, 0.08, 0.25, 1.0)
         GL.glLineWidth(1.0)
         GL.glPolygonMode(GL.GL_FRONT_AND_BACK, GL.GL_FILL)
 
@@ -161,6 +173,22 @@ def projection_example(width, height):
         )
         # como dibujaremos líneas y no polígonos, debemos especificarlo en la llamada a draw
         grid_gpu.draw(grid['gl_type'])
+
+        GL.glDisable(GL.GL_DEPTH_TEST)
+        projection_type = transformations["projection_type"]
+        if projection_type == "perspective":
+            label_text = f"Perspectiva  |  FOV: {fov:.0f}°  |  +/- cambia FOV  |  P para isométrica"
+        else:
+            label_text = "Isométrica  |  P para perspectiva"
+        pyglet.text.Label(
+            label_text,
+            font_name="Fira Code", font_size=13,
+            x=10, y=14, color=(255, 255, 255, 255),
+        ).draw()
+
+        # Matrices de vista y proyección en la esquina superior derecha
+        view_bottom = _draw_matrix(transformations["view"],       "V =", x=width - 10, y=height - 22)
+        _draw_matrix(transformations["projection"], "P =", x=width - 10, y=view_bottom - 8)
 
     def update_world(dt, window):
         nonlocal total_time

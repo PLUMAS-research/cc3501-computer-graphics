@@ -1,14 +1,16 @@
 #version 330
+
 in vec3 position;
+
 uniform mat4 transform;
 uniform mat4 view;
 uniform mat4 projection;
+uniform vec3 color;
 
 out vec3 fragColor;
 
 void main()
 {
-    // Gris azulado claro, visible sobre el fondo oscuro
-    fragColor = vec3(0.32, 0.34, 0.52);
+    fragColor = color;
     gl_Position = projection * view * transform * vec4(position, 1.0f);
 }

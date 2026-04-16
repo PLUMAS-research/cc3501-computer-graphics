@@ -2,10 +2,6 @@ import numpy as np
 import trimesh as tm
 import grafica.transformations as tr
 from itertools import chain
-# importamos esta función de trimesh porque nos permitirá asignarle una propiedad a cada vértice
-# y pintaremos el conejo en función de esa propiedad
-# en este caso, es la curvatura de la superficie
-from trimesh.curvature import discrete_gaussian_curvature_measure
 import pyglet.gl as GL
 
 def rectangulo():
@@ -27,20 +23,13 @@ def rectangulo():
         dtype=np.float32,
     )
 
+    # Gradiente sutil: azul marino en la parte inferior, violeta en la superior
     vertex_colors = np.array(
         [
-            1.0,
-            204 / 255.0,
-            1.0,  # inf izq
-            1.0,
-            204 / 255.0,
-            1.0,  # if der
-            204 / 255.0,
-            1.0,
-            1.0,  # sup der
-            204 / 255.0,
-            1.0,
-            1.0,  # sup izq
+            0.06, 0.08, 0.25,  # inf izq  — azul marino
+            0.06, 0.08, 0.25,  # inf der  — azul marino
+            0.26, 0.08, 0.38,  # sup der  — violeta
+            0.26, 0.08, 0.38,  # sup izq  — violeta
         ],
         dtype=np.float32,
     )
@@ -70,20 +59,19 @@ def stanford_bunny():
     # asumiento que z apunta hacia arriba en nuestro mundo
     bunny.apply_transform(tr.translate(0, 0, -bunny.vertices[:, 2].min()))
 
-    # aquí calculamos la curvatura. pueden ver la documentación de trimesh para saber qué es.
-    bunny_curvature = discrete_gaussian_curvature_measure(bunny, bunny.vertices, 0.01)
-    # la curvatura está definida entre -1 y 1, así que la convertimos al rango 0 a 1.
-    # usaremos este valor para pintar cada vértice en el vertex shader
-    bunny_curvature = (bunny_curvature + 1) / 2
-
     bunny_vertex_list = tm.rendering.mesh_to_vertexlist(bunny)
+
+    # Normales por vértice de cara, expandidas en el mismo orden que las posiciones.
+    # bunny.faces tiene forma (n_caras, 3), así que vertex_normals[faces] tiene
+    # forma (n_caras, 3, 3) → reshape(-1, 3) da (n_caras*3, 3).
+    vertex_normals_expanded = bunny.vertex_normals[bunny.faces].reshape(-1, 3)
 
     return {
         "mesh": bunny,
         "position": bunny_vertex_list[4][1],
         "n_vertices": len(bunny_vertex_list[4][1]) // 3,
         "indices": bunny_vertex_list[3],
-        "curvature": np.take(bunny_curvature, bunny.faces).reshape(-1, 1, order="C"),
+        "normal": vertex_normals_expanded.flatten().astype(np.float32),
         'gl_type': GL.GL_TRIANGLES
     }
 

@@ -9,6 +9,7 @@ import click
 
 import grafica.transformations as tr
 from grafica.utils import load_pipeline
+from grafica.ui import ui_overlay
 from examples.projection.elementos import stanford_bunny, regular_grid, rectangulo
 
 
@@ -288,31 +289,31 @@ def camera_frustum(width, height):
 
         # ── Restaurar viewport completo y dibujar HUD ─────────────────────────
         GL.glViewport(0, 0, width, height)
-        GL.glDisable(GL.GL_DEPTH_TEST)
 
-        # Parámetros y controles de la cámara observada
-        pyglet.text.Label(
-            f"FOV: {observed_fov:.0f}°  Far: {far_dist:.2f}",
-            font_name="Fira Code", font_size=13,
-            x=10, y=height - 26, color=(255, 255, 255, 255),
-        ).draw()
-        pyglet.text.Label(
-            "+/-: FOV     ↑/↓: largo del frustum",
-            font_name="Fira Code", font_size=11,
-            x=10, y=height - 46, color=(190, 190, 190, 255),
-        ).draw()
+        with ui_overlay():
+            # Parámetros y controles de la cámara observada
+            pyglet.text.Label(
+                f"FOV: {observed_fov:.0f}°  Far: {far_dist:.2f}",
+                font_name="Fira Code", font_size=13,
+                x=10, y=height - 26, color=(255, 255, 255, 255),
+            ).draw()
+            pyglet.text.Label(
+                "+/-: FOV     ↑/↓: largo del frustum",
+                font_name="Fira Code", font_size=11,
+                x=10, y=height - 46, color=(190, 190, 190, 255),
+            ).draw()
 
-        # Matrices de vista y proyección de la cámara observada
-        view_bottom = draw_matrix(observed_view,       "V =", x=10, y=height - 70)
-        draw_matrix(observed_projection, "P =", x=10, y=view_bottom - 8)
+            # Matrices de vista y proyección de la cámara observada
+            view_bottom = draw_matrix(observed_view,       "V =", x=10, y=height - 70)
+            draw_matrix(observed_projection, "P =", x=10, y=view_bottom - 8)
 
-        # Etiqueta del PiP
-        pyglet.text.Label(
-            "Vista externa",
-            font_name="Fira Code", font_size=10,
-            x=pip_x + 6, y=pip_y + pip_h - 18,
-            color=(230, 200, 50, 255),
-        ).draw()
+            # Etiqueta del PiP
+            pyglet.text.Label(
+                "Vista externa",
+                font_name="Fira Code", font_size=10,
+                x=pip_x + 6, y=pip_y + pip_h - 18,
+                color=(230, 200, 50, 255),
+            ).draw()
 
     def update(dt, window):
         nonlocal total_time

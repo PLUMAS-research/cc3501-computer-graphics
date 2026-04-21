@@ -10,6 +10,7 @@ from pyglet.window import key
 import click
 
 import grafica.transformations as tr
+from grafica.ui import ui_overlay
 from grafica.utils import load_pipeline
 from grafica.scenegraph import Scenegraph
 from grafica.scenegraph_premade import unit_axes_node
@@ -369,30 +370,31 @@ def camera_path(width, height):
 
         # Mostrar información en pantalla
         mode_text = "VISTA FIJA" if current_camera_mode == "fixed" else "VISTA TRAYECTORIA"
-        info_label = pyglet.text.Label(
-            f'Velocidad: {animation_speed:.2f} | {mode_text} | '
-            f'{"PAUSADO" if is_paused else "REPRODUCIENDO"} | '
-            f'Curvas: {"SÍ" if show_curves else "NO"} | '
-            f'Polígonos: {"SÍ" if show_control_polygon else "NO"}',
-            font_name='Arial', font_size=14,
-            x=10, y=height-25, color=(255, 255, 255, 255)
-        )
-        info_label.draw()
+        with ui_overlay():
+            info_label = pyglet.text.Label(
+                f'Velocidad: {animation_speed:.2f} | {mode_text} | '
+                f'{"PAUSADO" if is_paused else "REPRODUCIENDO"} | '
+                f'Curvas: {"SÍ" if show_curves else "NO"} | '
+                f'Polígonos: {"SÍ" if show_control_polygon else "NO"}',
+                font_name='Arial', font_size=14,
+                x=10, y=height-25, color=(255, 255, 255, 255)
+            )
+            info_label.draw()
 
-        controls_label = pyglet.text.Label(
-            'Controles: ESPACIO=pausa, +/- =velocidad, R=reiniciar, V=cambiar cámara, C=curvas, P=polígonos',
-            font_name='Arial', font_size=10,
-            x=10, y=height-45, color=(200, 200, 200, 255)
-        )
-        controls_label.draw()
+            controls_label = pyglet.text.Label(
+                'Controles: ESPACIO=pausa, +/- =velocidad, R=reiniciar, V=cambiar cámara, C=curvas, P=polígonos',
+                font_name='Arial', font_size=10,
+                x=10, y=height-45, color=(200, 200, 200, 255)
+            )
+            controls_label.draw()
 
-        # Mostrar leyenda de colores
-        legend_label = pyglet.text.Label(
-            'Rojo=control cámara, Azul=control mira, Verde=pos cámara, Amarillo=pos mira, Rosa=curva cámara, Celeste=curva mira',
-            font_name='Arial', font_size=12,
-            x=10, y=height-65, color=(180, 180, 180, 255)
-        )
-        legend_label.draw()
+            # Mostrar leyenda de colores
+            legend_label = pyglet.text.Label(
+                'Rojo=control cámara, Azul=control mira, Verde=pos cámara, Amarillo=pos mira, Rosa=curva cámara, Celeste=curva mira',
+                font_name='Arial', font_size=12,
+                x=10, y=height-65, color=(180, 180, 180, 255)
+            )
+            legend_label.draw()
 
     @window.event
     def on_key_press(symbol, modifiers):

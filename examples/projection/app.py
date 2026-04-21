@@ -11,6 +11,7 @@ import click
 
 import grafica.transformations as tr
 from grafica.utils import load_pipeline
+from grafica.ui import ui_overlay
 # esta vez pusimos todos nuestros elementos en un archivo extra
 from .elementos import rectangulo, stanford_bunny, regular_grid
 
@@ -174,21 +175,21 @@ def projection_example(width, height):
         # como dibujaremos líneas y no polígonos, debemos especificarlo en la llamada a draw
         grid_gpu.draw(grid['gl_type'])
 
-        GL.glDisable(GL.GL_DEPTH_TEST)
         projection_type = transformations["projection_type"]
         if projection_type == "perspective":
             label_text = f"Perspectiva  |  FOV: {fov:.0f}°  |  +/- cambia FOV  |  P para isométrica"
         else:
             label_text = "Isométrica  |  P para perspectiva"
-        pyglet.text.Label(
-            label_text,
-            font_name="Fira Code", font_size=13,
-            x=10, y=14, color=(255, 255, 255, 255),
-        ).draw()
+        with ui_overlay():
+            pyglet.text.Label(
+                label_text,
+                font_name="Fira Code", font_size=13,
+                x=10, y=14, color=(255, 255, 255, 255),
+            ).draw()
 
-        # Matrices de vista y proyección en la esquina superior derecha
-        view_bottom = _draw_matrix(transformations["view"],       "V =", x=width - 10, y=height - 22)
-        _draw_matrix(transformations["projection"], "P =", x=width - 10, y=view_bottom - 8)
+            # Matrices de vista y proyección en la esquina superior derecha
+            view_bottom = _draw_matrix(transformations["view"],       "V =", x=width - 10, y=height - 22)
+            _draw_matrix(transformations["projection"], "P =", x=width - 10, y=view_bottom - 8)
 
     def update_world(dt, window):
         nonlocal total_time

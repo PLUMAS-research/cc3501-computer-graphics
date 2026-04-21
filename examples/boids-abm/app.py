@@ -3,6 +3,7 @@ import pyglet
 import OpenGL.GL as GL
 
 import grafica.transformations as tr
+from grafica.ui import ui_overlay
 from .world import World
 from .pajarito import Pajarito
 from .grid import Grid
@@ -199,12 +200,11 @@ def boids_abm(n_pajaritos, width, height, world_width, world_height):
         # dibujamos la GUI
         # ¡tenemos que desactivar el test de profundidad!
         # propuesto: ¿por qué?
-        GL.glDisable(GL.GL_DEPTH_TEST)
+        with ui_overlay():
+            for l in labels.values():
+                l.draw()
 
-        for l in labels.values():
-            l.draw()
-
-        gui_batch.draw()
+            gui_batch.draw()
 
     def view_transform(bird_camera):
         if not bird_camera:

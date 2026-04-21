@@ -13,6 +13,7 @@ from grafica.utils import load_pipeline
 from grafica.arcball import Arcball
 from grafica.textures import texture_2D_setup
 from grafica.scenegraph import Scenegraph
+from grafica.ui import ui_overlay
 
 # from grafica.scenegraph_nodes import node_from_file
 from grafica.scenegraph_premade import rectangle_2d
@@ -231,11 +232,11 @@ def arcball_example(filename, width, height):
         )
 
         graph.render()
-        
+
         # Dibujar la interfaz de texto
-        GL.glDisable(GL.GL_DEPTH_TEST)
         update_status_text()
-        batch.draw()
+        with ui_overlay():
+            batch.draw()
 
     # Inicializar el texto de estado
     update_status_text()

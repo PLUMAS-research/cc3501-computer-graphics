@@ -97,6 +97,10 @@ from examples.scene_graphs.app import solar_system
 
 grafica_cli.add_command(solar_system)
 
+from examples.pokemon_instancing import pokemon_instancing
+
+grafica_cli.add_command(pokemon_instancing)
+
 from examples.transformation_composition.app import compositions
 
 grafica_cli.add_command(compositions)
@@ -160,6 +164,14 @@ grafica_cli.add_command(quadtree_demo)
 from examples.rasterizer import rasterizer
 
 grafica_cli.add_command(rasterizer)
+
+from examples.texture_viewer import texture_viewer
+
+grafica_cli.add_command(texture_viewer)
+
+from examples.lapped_hatching import lapped_hatching
+
+grafica_cli.add_command(lapped_hatching)
 
 if __name__ == "__main__":
     grafica_cli()

@@ -24,6 +24,10 @@ class Scenegraph(nx.DiGraph):
         self.current_view = None
         self.view_parameter_name = 'view'
         self.transform_parameter_name = 'transform'
+        # Cache de vertex_lists GPU por (mesh_name, child_index, pipeline_name).
+        # Permite que múltiples instancias de la misma malla compartan el mismo
+        # buffer en la GPU; cada instancia solo aporta sus uniforms propios.
+        self.mesh_gpu_cache = {}
 
     def load_and_register_pipeline(
         self, name, vertex_program_path, fragment_program_path
@@ -57,24 +61,55 @@ class Scenegraph(nx.DiGraph):
     def register_mesh(self, name, mesh):
         self.meshes[name] = mesh
 
-    def add_mesh_instance(self, name, mesh_name, pipeline, **instance_attributes):
+    def add_mesh_instance(self, name, mesh_name, pipeline_name, **instance_attributes):
+        if mesh_name not in self.meshes:
+            raise KeyError(f"Malla '{mesh_name}' no está registrada")
+        if pipeline_name not in self.pipelines:
+            raise KeyError(f"Pipeline '{pipeline_name}' no está registrada")
 
-        self._add_instance(
-            name, self.meshes[mesh_name], pipeline, **instance_attributes
+        mesh = self.meshes[mesh_name]
+
+        # el nodo base acumula transformaciones. Puede tener su propia malla
+        # (nodos "planos" como unit_axes_node) o no (mallas cargadas desde
+        # archivo, que agrupan su geometría en children).
+        base_node = self._build_instance_node(
+            mesh, mesh_name, None, pipeline_name, instance_attributes
         )
+        self.add_node(name, **base_node)
 
-    def _add_instance(self, name, mesh, pipeline, **instance_attributes):
-        if instance_attributes is None:
-            instance_attributes = {}
-
-        self.add_node(name, **self._instance_node(mesh, pipeline, instance_attributes))
-
-        for i, child in enumerate(mesh["children"]):
-            child_name = f"{name}_child_{i}"
-            self.add_node(
-                child_name, **self._instance_node(child, pipeline, instance_attributes)
+        for child_index, child in enumerate(mesh["children"]):
+            child_name = f"{name}_child_{child_index}"
+            child_node = self._build_instance_node(
+                child, mesh_name, child_index, pipeline_name, instance_attributes
             )
+            self.add_node(child_name, **child_node)
             self.add_edge(name, child_name)
+
+    def add_object(self, name, mesh_name, pipeline_name, parent=None, transform=None, **instance_attributes):
+        """
+        Crea una instancia de malla bajo un nodo de transformación.
+
+        Estructura resultante: parent -> name (transform) -> name_mesh (malla).
+
+        Parámetros:
+        name -- Identificador del nodo de transformación
+        mesh_name -- Malla registrada previamente
+        pipeline_name -- Pipeline registrado previamente
+        parent -- Nodo padre. Si es None, no se agrega arista hacia un padre.
+        transform -- Transformación local (por defecto identidad)
+        **instance_attributes -- Atributos uniform por instancia (ej: color)
+        """
+        if transform is None:
+            transform = tr.identity()
+
+        mesh_node_name = f"{name}_mesh"
+
+        self.add_transform(name, transform)
+        self.add_mesh_instance(mesh_node_name, mesh_name, pipeline_name, **instance_attributes)
+        self.add_edge(name, mesh_node_name)
+
+        if parent is not None:
+            self.add_edge(parent, name)
 
     def render(self, recalculate_transforms=True, **pipeline_attrs):
         """
@@ -193,35 +228,44 @@ class Scenegraph(nx.DiGraph):
                 # Dibujar!
                 current_node["mesh_gpu"].draw(current_node.get("GL_TYPE"))
 
-    def __add_pipeline_single_node(self, node, pipeline_name):
-        if "mesh" not in node or node["mesh"] is None:
-            node["pipeline"] = None
-            return
+    def _build_instance_node(self, mesh_node, mesh_name, child_index, pipeline_name, instance_attributes):
+        """
+        Arma el diccionario que representa una instancia de un nodo de malla.
+        Reutiliza el vertex_list GPU si otra instancia ya lo solicitó antes.
+        """
+        instance = copy(mesh_node)
+        instance["instance_attributes"] = instance_attributes
+
+        if mesh_node.get("mesh") is None:
+            instance["pipeline"] = None
+            instance["mesh_gpu"] = None
+            return instance
+
+        instance["pipeline"] = pipeline_name
+        instance["mesh_gpu"] = self._get_or_create_mesh_gpu(
+            mesh_node, mesh_name, child_index, pipeline_name
+        )
+        return instance
+
+    def _get_or_create_mesh_gpu(self, mesh_node, mesh_name, child_index, pipeline_name):
+        cache_key = (mesh_name, child_index, pipeline_name)
+        if cache_key in self.mesh_gpu_cache:
+            return self.mesh_gpu_cache[cache_key]
 
         pipeline = self.pipelines[pipeline_name]
-
         mesh_gpu = pipeline.vertex_list_indexed(
-            node["mesh"]["n_vertices"], node["GL_TYPE"], node["indices"]
+            mesh_node["mesh"]["n_vertices"], mesh_node["GL_TYPE"], mesh_node["indices"]
         )
+        for attribute_name, attribute_data in mesh_node["attributes"].items():
+            if attribute_data is not None and hasattr(mesh_gpu, attribute_name):
+                getattr(mesh_gpu, attribute_name)[:] = attribute_data
 
-        node["pipeline"] = pipeline_name
-        node["mesh_gpu"] = mesh_gpu
+        self.mesh_gpu_cache[cache_key] = mesh_gpu
+        return mesh_gpu
 
-        for attr in node["attributes"]:
-            if node["attributes"][attr] is not None and hasattr(mesh_gpu, attr):
-                getattr(mesh_gpu, attr)[:] = node["attributes"][attr]
-
-    def _add_node_pipeline(self, node, pipeline):
-        self.__add_pipeline_single_node(node, pipeline)
-        for child in node["children"]:
-            self.__add_pipeline_single_node(child, pipeline)
-
-    def _instance_node(self, node, pipeline, instance_attrs=None):
-        instance = copy(node)
-        self._add_node_pipeline(instance, pipeline)
-        instance["instance_attributes"] = instance_attrs
-
-        return instance
+    def unique_gpu_buffers(self):
+        """Cantidad de vertex_lists distintos en GPU (útil para diagnóstico)."""
+        return len(self.mesh_gpu_cache)
 
     def apply_instance_attributes(self, node_key, **attrs):
         """

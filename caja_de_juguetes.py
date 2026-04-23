@@ -173,5 +173,9 @@ from examples.lapped_hatching import lapped_hatching
 
 grafica_cli.add_command(lapped_hatching)
 
+from examples.perspective_correction import perspective_correction
+
+grafica_cli.add_command(perspective_correction)
+
 if __name__ == "__main__":
     grafica_cli()

@@ -177,5 +177,13 @@ from examples.perspective_correction import perspective_correction
 
 grafica_cli.add_command(perspective_correction)
 
+from examples.pecera import pecera
+
+grafica_cli.add_command(pecera)
+
+from examples.bosque import bosque
+
+grafica_cli.add_command(bosque)
+
 if __name__ == "__main__":
     grafica_cli()

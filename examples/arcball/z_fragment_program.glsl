@@ -1,11 +1,21 @@
 #version 330
 
-in float frag_depth;
+in float view_z;
 out vec4 out_color;
 
+uniform float depth_near;
+uniform float depth_far;
+
 void main() {
-    // Transición cálido→frío al estilo Gooch: naranja cerca, azul lejos
-    vec3 warm = vec3(1.00, 0.60, 0.05);
-    vec3 cool = vec3(0.05, 0.15, 0.65);
-    out_color = vec4(mix(warm, cool, frag_depth), 1.0);
+    // Visualización del z-buffer: cada fragmento se colorea según su
+    // profundidad lineal en cámara. El rango (depth_near, depth_far) se ajusta
+    // dinámicamente al bounding sphere del modelo, así el gradiente cubre toda
+    // la superficie y no solo una franja del frustum.
+    float t = clamp((view_z - depth_near) / (depth_far - depth_near), 0.0, 1.0);
+
+    // Paleta Gooch (azul frío, amarillo cálido). Lo cercano queda cálido,
+    // lo lejano frío.
+    vec3 cool = vec3(0.00, 0.00, 0.55);
+    vec3 warm = vec3(0.55, 0.55, 0.00);
+    out_color = vec4(mix(warm, cool, t), 1.0);
 }

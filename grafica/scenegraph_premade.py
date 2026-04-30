@@ -207,6 +207,44 @@ def line_node(start_point, end_point, color=[1, 1, 0], id=None, parent=None):
         'has_texture': False
     }
 
+def ring_node(radius=1.0, n_segments=128, color=[1, 1, 0], id=None, parent=None):
+    """
+    Crea un nodo con un anillo (LINE_LOOP) en el plano XY.
+
+    Parámetros:
+    radius -- Radio del anillo
+    n_segments -- Cantidad de segmentos del anillo
+    color -- Color RGB del anillo [r, g, b]
+    """
+    angles = np.linspace(0, 2 * np.pi, n_segments, endpoint=False)
+    positions = np.zeros(n_segments * 3, dtype=np.float32)
+    positions[0::3] = radius * np.cos(angles)
+    positions[1::3] = radius * np.sin(angles)
+
+    colors = np.tile(color, n_segments).astype(np.float32)
+
+    return {
+        'mesh': {
+            'n_vertices': n_segments,
+            'texture': None,
+            'textures': {}
+        },
+        'attributes': {
+            'position': positions,
+            'color': colors,
+            'uv': None,
+            'normal': None
+        },
+        'indices': list(range(n_segments)),
+        'GL_TYPE': GL.GL_LINE_LOOP,
+        'transform': tr.identity(),
+        'id': id,
+        'children': [],
+        'parent': parent,
+        'object': None,
+        'has_texture': False
+    }
+
 def point_node(position, color=[1, 0, 0], id=None, parent=None):
     """
     Crea un nodo con un punto.

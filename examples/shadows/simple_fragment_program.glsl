@@ -1,9 +1,10 @@
 #version 330
 
-in vec4 frag_color;
+// Pass de profundidad: solo escribimos al depth buffer. gl_FragCoord.z
+// se calcula automáticamente. El color que sale por out_color no se lee
+// porque el FBO del shadow pass no tiene color attachment.
 out vec4 out_color;
 
-void main()
-{
-    out_color = vec4(vec3(gl_FragCoord.z), 1.0);
+void main() {
+    out_color = vec4(1.0);
 }

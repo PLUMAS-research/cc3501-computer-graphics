@@ -1,9 +1,14 @@
 #version 330
 
-in vec2 frag_texcoord;
+in vec2 fragment_texcoord;
 out vec4 out_color;
 uniform sampler2D sampler_tex;
 
 void main() {
-    out_color = vec4(texture(sampler_tex, frag_texcoord).r, 0.05, 0.75, 1.0);
+    // El shadow map almacena profundidad en [0, 1]. Para visualizarlo
+    // expandimos el rango cercano a la luz, donde está casi toda la
+    // información útil (la cámara de luz tiene near/far comprimido).
+    float depth = texture(sampler_tex, fragment_texcoord).r;
+    float visualized = pow(depth, 16.0);
+    out_color = vec4(vec3(visualized), 1.0);
 }

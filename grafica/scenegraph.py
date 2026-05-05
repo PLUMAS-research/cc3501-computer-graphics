@@ -111,14 +111,20 @@ class Scenegraph(nx.DiGraph):
         if parent is not None:
             self.add_edge(parent, name)
 
-    def render(self, recalculate_transforms=True, **pipeline_attrs):
+    def render(self, recalculate_transforms=True, only_pipelines=None, **pipeline_attrs):
         """
         Renderiza el grafo de escena.
 
         Parámetros:
         recalculate_transforms -- Si es True, recalcula las transformaciones globales
+        only_pipelines -- Si se entrega un conjunto/lista de nombres de pipeline,
+            solo se renderizan los nodos cuyo pipeline esté en ese conjunto. Útil
+            para passes selectivos (por ejemplo, shadow mapping: durante el pass
+            de profundidad solo queremos los objetos que proyectan sombra).
         **pipeline_attrs -- Atributos adicionales para las pipelines
         """
+        if only_pipelines is not None:
+            only_pipelines = set(only_pipelines)
         # por cada pipeline, configuramos sus atributos uniform
         for pipeline_name, pipeline in self.pipelines.items():
             pipeline.use()
@@ -157,6 +163,8 @@ class Scenegraph(nx.DiGraph):
         for node_key, current_node in self.nodes.items():
             if "mesh" in current_node:
                 if current_node["pipeline"] is None:
+                    continue
+                if only_pipelines is not None and current_node["pipeline"] not in only_pipelines:
                     continue
                 current_pipeline = self.pipelines[current_node["pipeline"]]
                 current_pipeline.use()

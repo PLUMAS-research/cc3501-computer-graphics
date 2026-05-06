@@ -192,8 +192,7 @@ def sistema_tierra(width, height, earth_texture, moon_texture):
         )
         return
 
-    config = pyglet.gl.Config(sample_buffers=1, samples=4, depth_size=24)
-    window = pyglet.window.Window(width, height, config=config)
+    window = pyglet.window.Window(width, height)
 
     pyglet.font.add_file(
         str(Path(__file__).parent.parent.parent / "assets" / "FiraCode" / "FiraCode-Regular.ttf")

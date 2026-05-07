@@ -61,7 +61,29 @@ class Scenegraph(nx.DiGraph):
     def register_mesh(self, name, mesh):
         self.meshes[name] = mesh
 
-    def add_mesh_instance(self, name, mesh_name, pipeline_name, **instance_attributes):
+    def add_mesh_instance(self, name, mesh_name, pipeline_name, parent=None, **instance_attributes):
+        """
+        Crea una instancia de una malla bajo un nuevo nodo del grafo.
+
+        Parámetros:
+        name -- Identificador del nodo a crear.
+        mesh_name -- Nombre de la malla previamente registrada (con
+            register_mesh o load_and_register_mesh). Acepta también un dict
+            de malla (el que devuelven helpers como rectangle_2d,
+            bounding_box_node, etc.): en ese caso la malla se registra
+            automáticamente bajo `name`.
+        pipeline_name -- Pipeline previamente registrada.
+        parent -- Si se entrega, se agrega un edge `parent -> name` después
+            de crear la instancia. Equivale a llamar add_edge a continuación.
+        **instance_attributes -- Uniforms por instancia (transform, color,
+            etc.).
+        """
+        # Permitir pasar la malla inline. La registramos bajo el nombre de la
+        # instancia y seguimos el flujo normal con un mesh_name string.
+        if isinstance(mesh_name, dict):
+            self.register_mesh(name, mesh_name)
+            mesh_name = name
+
         if mesh_name not in self.meshes:
             raise KeyError(f"Malla '{mesh_name}' no está registrada")
         if pipeline_name not in self.pipelines:
@@ -84,6 +106,9 @@ class Scenegraph(nx.DiGraph):
             )
             self.add_node(child_name, **child_node)
             self.add_edge(name, child_name)
+
+        if parent is not None:
+            self.add_edge(parent, name)
 
     def add_object(self, name, mesh_name, pipeline_name, parent=None, transform=None, **instance_attributes):
         """
@@ -111,16 +136,22 @@ class Scenegraph(nx.DiGraph):
         if parent is not None:
             self.add_edge(parent, name)
 
-    def render(self, recalculate_transforms=True, only_pipelines=None, **pipeline_attrs):
+    def render(self, recalculate_transforms=True, only_pipelines=None, pipeline_override=None, **pipeline_attrs):
         """
         Renderiza el grafo de escena.
 
         Parámetros:
         recalculate_transforms -- Si es True, recalcula las transformaciones globales
         only_pipelines -- Si se entrega un conjunto/lista de nombres de pipeline,
-            solo se renderizan los nodos cuyo pipeline esté en ese conjunto. Útil
-            para passes selectivos (por ejemplo, shadow mapping: durante el pass
-            de profundidad solo queremos los objetos que proyectan sombra).
+            solo se renderizan los nodos cuyo pipeline declarado esté en ese
+            conjunto. Útil para passes selectivos (por ejemplo, shadow mapping:
+            durante el pass de profundidad solo queremos los objetos que
+            proyectan sombra).
+        pipeline_override -- Si se entrega, las instancias se dibujan con ese
+            pipeline en lugar del declarado. Útil para shadow mapping: durante
+            el pass de profundidad las mallas que normalmente usan el shader
+            de iluminación se redirigen al shader de profundidad sin duplicar
+            las instancias en el grafo.
         **pipeline_attrs -- Atributos adicionales para las pipelines
         """
         if only_pipelines is not None:
@@ -166,7 +197,8 @@ class Scenegraph(nx.DiGraph):
                     continue
                 if only_pipelines is not None and current_node["pipeline"] not in only_pipelines:
                     continue
-                current_pipeline = self.pipelines[current_node["pipeline"]]
+                effective_pipeline_name = pipeline_override or current_node["pipeline"]
+                current_pipeline = self.pipelines[effective_pipeline_name]
                 current_pipeline.use()
 
                 # Usar la transformación global ya calculada
@@ -234,7 +266,11 @@ class Scenegraph(nx.DiGraph):
                             pass
 
                 # Dibujar!
-                current_node["mesh_gpu"].draw(current_node.get("GL_TYPE"))
+                if effective_pipeline_name == current_node["pipeline"]:
+                    mesh_gpu = current_node["mesh_gpu"]
+                else:
+                    mesh_gpu = self._resolve_mesh_gpu(current_node, effective_pipeline_name)
+                mesh_gpu.draw(current_node.get("GL_TYPE"))
 
     def _build_instance_node(self, mesh_node, mesh_name, child_index, pipeline_name, instance_attributes):
         """
@@ -243,6 +279,11 @@ class Scenegraph(nx.DiGraph):
         """
         instance = copy(mesh_node)
         instance["instance_attributes"] = instance_attributes
+        # Estos dos campos permiten que render() resuelva el vertex_list
+        # cuando se renderiza con un pipeline distinto al declarado (caso
+        # del pass de profundidad en shadow mapping).
+        instance["_mesh_name"] = mesh_name
+        instance["_child_index"] = child_index
 
         if mesh_node.get("mesh") is None:
             instance["pipeline"] = None
@@ -254,6 +295,30 @@ class Scenegraph(nx.DiGraph):
             mesh_node, mesh_name, child_index, pipeline_name
         )
         return instance
+
+    def _resolve_mesh_gpu(self, instance_node, pipeline_name):
+        """
+        Devuelve el vertex_list para esta instancia bajo el pipeline dado.
+        Crea uno nuevo si no existe en el cache (caso del pipeline_override
+        durante shadow mapping).
+        """
+        cache_key = (
+            instance_node["_mesh_name"],
+            instance_node["_child_index"],
+            pipeline_name,
+        )
+        if cache_key in self.mesh_gpu_cache:
+            return self.mesh_gpu_cache[cache_key]
+
+        mesh_node = self.meshes[instance_node["_mesh_name"]]
+        if instance_node["_child_index"] is not None:
+            mesh_node = mesh_node["children"][instance_node["_child_index"]]
+        return self._get_or_create_mesh_gpu(
+            mesh_node,
+            instance_node["_mesh_name"],
+            instance_node["_child_index"],
+            pipeline_name,
+        )
 
     def _get_or_create_mesh_gpu(self, mesh_node, mesh_name, child_index, pipeline_name):
         cache_key = (mesh_name, child_index, pipeline_name)

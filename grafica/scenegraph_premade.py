@@ -118,15 +118,18 @@ def grid_2d(resolution, id=None, parent=None):
         'object': None,
     }
 
-def bounding_box_node(min_bounds, max_bounds, id=None, parent=None):
+def bounding_box_node(min_bounds, max_bounds, color=[0, 1, 0], id=None, parent=None):
     """
-    Crea un nodo con las líneas de un bounding box.
-    
+    Crea un nodo wireframe con las 12 aristas de un bounding box.
+
+    Devuelve una malla con 8 vértices (las esquinas) y 24 índices que las
+    conectan en pares para formar las aristas (modo GL_LINES).
+
     Parámetros:
-    min_bounds -- Array numpy con las coordenadas mínimas [x, y, z]
-    max_bounds -- Array numpy con las coordenadas máximas [x, y, z]
+    min_bounds -- Coordenadas mínimas [x, y, z]
+    max_bounds -- Coordenadas máximas [x, y, z]
+    color -- Color RGB de las líneas [r, g, b]
     """
-    # 8 vértices del bounding box
     corners = np.array([
         [min_bounds[0], min_bounds[1], min_bounds[2]],
         [max_bounds[0], min_bounds[1], min_bounds[2]],
@@ -135,31 +138,25 @@ def bounding_box_node(min_bounds, max_bounds, id=None, parent=None):
         [min_bounds[0], min_bounds[1], max_bounds[2]],
         [max_bounds[0], min_bounds[1], max_bounds[2]],
         [max_bounds[0], max_bounds[1], max_bounds[2]],
-        [min_bounds[0], max_bounds[1], max_bounds[2]]
-    ])
-    
-    # 12 aristas del cubo (cada arista se define por 2 índices)
-    edges = [
-        0, 1, 1, 2, 2, 3, 3, 0,  # cara inferior
-        4, 5, 5, 6, 6, 7, 7, 4,  # cara superior
-        0, 4, 1, 5, 2, 6, 3, 7   # aristas verticales
-    ]
-    
-    # Aplanar las posiciones
-    positions = corners.flatten()
-    
-    # Color verde para todas las líneas
-    colors = np.tile([0, 1, 0], 24)  # 24 vértices × 3 componentes RGB
-    
+        [min_bounds[0], max_bounds[1], max_bounds[2]],
+    ], dtype=np.float32)
+
+    # 12 aristas, agrupadas por cara (z = min, z = max) y conectores entre ambas
+    edges = np.array([
+        0, 1, 1, 2, 2, 3, 3, 0,
+        4, 5, 5, 6, 6, 7, 7, 4,
+        0, 4, 1, 5, 2, 6, 3, 7,
+    ], dtype=np.uint32)
+
     return {
         'mesh': {
-            'n_vertices': 24,
+            'n_vertices': 8,
             'texture': None,
             'textures': {}
         },
         'attributes': {
-            'position': positions,
-            'color': colors,
+            'position': corners.flatten(),
+            'color': np.tile(np.asarray(color, dtype=np.float32), 8),
             'uv': None,
             'normal': None
         },

@@ -89,6 +89,14 @@ from examples.pymunk_boxes.app import falling_boxes
 
 grafica_cli.add_command(falling_boxes)
 
+from examples.pymunk_basico.app import pymunk_basico
+
+grafica_cli.add_command(pymunk_basico)
+
+from examples.pymunk_pinball.app import pymunk_pinball
+
+grafica_cli.add_command(pymunk_pinball)
+
 from examples.raytracing_cpu.app import raytracing_cpu
 
 grafica_cli.add_command(raytracing_cpu)
@@ -116,6 +124,10 @@ grafica_cli.add_command(spirograph)
 from examples.gimbal_lock import gimbal_lock
 
 grafica_cli.add_command(gimbal_lock)
+
+from examples.phong_basico import phong_basico
+
+grafica_cli.add_command(phong_basico)
 
 from examples.disco_bunny.app import disco_bunny
 

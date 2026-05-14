@@ -17,6 +17,7 @@ Controles:
 
 import math
 import random
+from pathlib import Path
 
 import click
 import pyglet
@@ -88,6 +89,15 @@ def crear_paredes(space, ancho, alto, grosor=10.0):
 @click.option("--height", type=int, default=700)
 def pymunk_basico(width, height):
     window = pyglet.window.Window(width, height, caption="pymunk basico")
+
+    pyglet.font.add_file(
+        str(
+            Path(__file__).parent.parent.parent
+            / "assets"
+            / "FiraCode"
+            / "FiraCode-Regular.ttf"
+        )
+    )
 
     # 1) creamos el espacio fisico.
     #    la gravedad esta en pixeles por segundo al cuadrado.
@@ -201,7 +211,7 @@ def pymunk_basico(width, height):
         )
         label = pyglet.text.Label(
             info,
-            font_name="sans-serif",
+            font_name="Fira Code",
             font_size=11,
             x=30,
             y=height - 25,

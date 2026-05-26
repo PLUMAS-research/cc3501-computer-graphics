@@ -58,6 +58,14 @@ from examples.cloth.app_verlet import cloth_verlet
 
 grafica_cli.add_command(cloth_verlet)
 
+from examples.masa_resorte import masa_resorte
+
+grafica_cli.add_command(masa_resorte)
+
+from examples.difusion_calor import difusion_calor
+
+grafica_cli.add_command(difusion_calor)
+
 boids = importlib.import_module("examples.boids-abm.app")
 grafica_cli.add_command(boids.boids_abm)
 
@@ -176,6 +184,14 @@ grafica_cli.add_command(flappy_redpanda)
 from examples.edo_case_studies import edo_case_studies
 
 grafica_cli.add_command(edo_case_studies)
+
+from examples.animacion_esqueletica import animacion_esqueletica
+
+grafica_cli.add_command(animacion_esqueletica)
+
+from examples.skinning import skinning
+
+grafica_cli.add_command(skinning)
 
 from examples.quadtree import quadtree_demo
 

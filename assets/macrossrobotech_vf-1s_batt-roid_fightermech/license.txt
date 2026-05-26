@@ -1,0 +1,11 @@
+Model Information:
+* title:	Macross/Robotech VF-1S Batt-Roid Fighter/Mech
+* source:	https://sketchfab.com/3d-models/macrossrobotech-vf-1s-batt-roid-fightermech-2dcd665e09e847218ef3b71a3e89f350
+* author:	cho3dman (https://sketchfab.com/cho3dman)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Macross/Robotech VF-1S Batt-Roid Fighter/Mech" (https://sketchfab.com/3d-models/macrossrobotech-vf-1s-batt-roid-fightermech-2dcd665e09e847218ef3b71a3e89f350) by cho3dman (https://sketchfab.com/cho3dman) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

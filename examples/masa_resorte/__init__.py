@@ -20,11 +20,11 @@ Controles:
 - ESC:      cierra la ventana.
 """
 
-from pathlib import Path
-
 import click
 import numpy as np
 import pyglet
+
+from grafica.ui import InfoPanel
 
 from .strand import METODOS, HebraMasaResorte
 
@@ -45,56 +45,12 @@ def _color_por_estiramiento(estiramiento):
     return (int(120 + 90 * nivel), int(120 + 60 * nivel), int(120 - 135 * nivel))
 
 
-class Panel:
-    """Panel de informacion en pantalla: etiquetas FiraCode arriba a la izquierda.
-
-    Agrupa la creacion de las etiquetas para que no ensucie el cuerpo principal.
-    apply_state() solo escribe en `panel.metodo`, `panel.k`, etc.; este objeto se
-    encarga de la posicion, la fuente y el dibujado.
-    """
-
-    def __init__(self, height):
-        self.batch = pyglet.graphics.Batch()
-
-        def etiqueta(fila, color=(220, 220, 220, 255), size=12):
-            return pyglet.text.Label(
-                "", font_name="Fira Code", font_size=size,
-                x=20, y=height - 25 - fila * 22, color=color, batch=self.batch,
-            )
-
-        self.metodo = etiqueta(0, size=14)
-        self.k = etiqueta(1)
-        self.c = etiqueta(2)
-        self.substeps = etiqueta(3)
-        self.energia = etiqueta(4)
-
-        # linea fija con los controles, al pie de la ventana.
-        self._controles = pyglet.text.Label(
-            "M metodo   , . rigidez   - = damping   z x substeps   "
-            "espacio empujon   mouse arrastra   R reset",
-            font_name="Fira Code", font_size=10, x=20, y=14,
-            color=(150, 150, 150, 255), batch=self.batch,
-        )
-
-    def draw(self):
-        self.batch.draw()
-
-
 @click.command("masa_resorte", short_help="Hebra masa-resorte: integradores y estabilidad")
 @click.option("--width", type=int, default=900)
 @click.option("--height", type=int, default=700)
 @click.option("--nodos", type=int, default=8, help="numero de masas de la hebra")
 def masa_resorte(width, height, nodos):
     window = pyglet.window.Window(width, height, caption="masa-resorte: hebra colgante")
-
-    pyglet.font.add_file(
-        str(
-            Path(__file__).parent.parent.parent
-            / "assets"
-            / "FiraCode"
-            / "FiraCode-Regular.ttf"
-        )
-    )
 
     separacion = 40.0
     ancla = (width / 2.0, height - 120.0)
@@ -103,7 +59,18 @@ def masa_resorte(width, height, nodos):
     state = dict(DEFAULTS)
     state["agarrado"] = None  # indice del nodo que sigue al mouse, o None.
 
-    panel = Panel(height)
+    panel = (
+        InfoPanel(x=20, y_top=height - 25, color=(220, 220, 220, 255))
+        .add("metodo", size=14)
+        .add("k")
+        .add("c")
+        .add("substeps")
+        .add("energia")
+        .footer(
+            "M metodo   , . rigidez   - = damping   z x substeps   "
+            "espacio empujon   mouse arrastra   R reset"
+        )
+    )
 
     def apply_state():
         """Traduce el estado actual a las etiquetas y al terminal.
@@ -112,10 +79,10 @@ def masa_resorte(width, height, nodos):
         `state` y llama aqui, asi las etiquetas nunca se desincronizan.
         """
         metodo = METODOS[state["metodo_index"]]
-        panel.metodo.text = f"metodo: {metodo}"
-        panel.k.text = f"rigidez k: {state['k']:.0f}"
-        panel.c.text = f"amortiguacion c: {state['c']:.1f}"
-        panel.substeps.text = f"substeps: {state['substeps']}"
+        panel["metodo"] = f"metodo: {metodo}"
+        panel["k"] = f"rigidez k: {state['k']:.0f}"
+        panel["c"] = f"amortiguacion c: {state['c']:.1f}"
+        panel["substeps"] = f"substeps: {state['substeps']}"
         print(
             f"[masa_resorte] metodo={metodo} k={state['k']:.0f} "
             f"c={state['c']:.1f} substeps={state['substeps']}"
@@ -133,11 +100,11 @@ def masa_resorte(width, height, nodos):
         )
         # la energia cinetica se dispara cuando el integrador explicito explota.
         if hebra.exploto:
-            panel.energia.text = "energia: INESTABLE (reinicia con R)"
-            panel.energia.color = (255, 90, 90, 255)
+            panel["energia"] = "energia: INESTABLE (reinicia con R)"
+            panel.color("energia", (255, 90, 90, 255))
         else:
-            panel.energia.text = f"energia cinetica: {hebra.energia_cinetica():.0f}"
-            panel.energia.color = (220, 220, 220, 255)
+            panel["energia"] = f"energia cinetica: {hebra.energia_cinetica():.0f}"
+            panel.color("energia", (220, 220, 220, 255))
 
     @window.event
     def on_key_press(symbol, modifiers):

@@ -89,6 +89,14 @@ from examples.terrain import terrain_generation
 
 grafica_cli.add_command(terrain_generation)
 
+from examples.operaciones_malla import operaciones_malla
+
+grafica_cli.add_command(operaciones_malla)
+
+from examples.simplificacion_qem import simplificacion_qem
+
+grafica_cli.add_command(simplificacion_qem)
+
 from examples.projection.app import projection_example
 
 grafica_cli.add_command(projection_example)

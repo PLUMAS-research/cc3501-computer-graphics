@@ -28,6 +28,7 @@ import numpy as np
 import pyglet
 from OpenGL import GL
 
+from grafica.ui import InfoPanel
 from grafica.utils import load_pipeline
 
 from .field import BORDES, CFL_MAXIMO, CampoCalor
@@ -54,69 +55,12 @@ def _crear_textura(n):
     return textura
 
 
-class Panel:
-    """Panel de informacion en pantalla: fondo translucido y etiquetas FiraCode.
-
-    Agrupa la creacion de las etiquetas para que no ensucie el cuerpo principal.
-    apply_state() solo escribe en `panel.alpha`, `panel.substeps`, etc.; este
-    objeto se encarga de la posicion, la fuente y el dibujado.
-    """
-
-    def __init__(self, lado):
-        self.batch = pyglet.graphics.Batch()
-
-        # fondo oscuro para que el texto se lea sobre el campo de calor.
-        self._fondo = pyglet.shapes.Rectangle(
-            0, lado - 116, 360, 116, color=(20, 20, 20), batch=self.batch
-        )
-        self._fondo.opacity = 170
-
-        def etiqueta(fila, size=12):
-            return pyglet.text.Label(
-                "",
-                font_name="Fira Code",
-                font_size=size,
-                x=14,
-                y=lado - 22 - fila * 22,
-                color=(230, 230, 230, 255),
-                batch=self.batch,
-            )
-
-        self.alpha = etiqueta(0)
-        self.substeps = etiqueta(1)
-        self.borde = etiqueta(2)
-        self.cfl = etiqueta(3)
-
-        # linea fija con los controles, al pie de la ventana.
-        self._controles = pyglet.text.Label(
-            ", . alpha   z x substeps   B borde   mouse calor   R reset",
-            font_name="Fira Code",
-            font_size=10,
-            x=14,
-            y=12,
-            color=(150, 150, 150, 255),
-            batch=self.batch,
-        )
-
-    def draw(self):
-        self.batch.draw()
-
-
 @click.command("difusion_calor", short_help="Difusion de calor 2D (enfoque euleriano)")
 @click.option("--n", type=int, default=150, help="celdas por lado de la grilla")
 @click.option("--escala", type=int, default=5, help="pixeles por celda")
 def difusion_calor(n, escala):
     lado = n * escala
     window = pyglet.window.Window(lado, lado, caption="difusion de calor 2D")
-
-    pyglet.font.add_file(
-        str(
-            Path(__file__).parent.parent.parent
-            / "assets"
-            / "FiraCode"
-            / "FiraCode-Regular.ttf"
-        )
-    )
 
     campo = CampoCalor(n)
     campo.inyectar(n // 2, n // 2, 10, 1.0)  # un punto caliente inicial.
@@ -140,7 +84,14 @@ def difusion_calor(n, escala):
     pipeline.use()
     pipeline["campo_temperatura"] = 0  # unidad de textura 0.
 
-    panel = Panel(lado)
+    panel = (
+        InfoPanel(x=14, y_top=lado - 22, background=(20, 20, 20))
+        .add("alpha")
+        .add("substeps")
+        .add("borde")
+        .add("cfl")
+        .footer(", . alpha   z x substeps   B borde   mouse calor   R reset")
+    )
 
     def apply_state():
         """Traduce el estado actual a las etiquetas y al terminal.
@@ -150,19 +101,19 @@ def difusion_calor(n, escala):
         """
         borde = BORDES[state["borde_index"]]
         # numero de difusion r = alpha * dt / dx^2 (con dx = 1). El metodo
-        # explicito solo es estable si r <= 1/4 (condicion CFL)
+        # explicito solo es estable si r <= 1/4 (condicion CFL).
         numero_difusion = campo.numero_difusion(
             state["alpha"], 1.0 / 60.0, state["substeps"]
         )
         estable = numero_difusion <= CFL_MAXIMO
-        panel.alpha.text = f"difusividad alpha: {state['alpha']:.0f}"
-        panel.substeps.text = f"substeps: {state['substeps']}"
-        panel.borde.text = f"borde: {borde}"
-        panel.cfl.text = (
+        panel["alpha"] = f"difusividad alpha: {state['alpha']:.0f}"
+        panel["substeps"] = f"substeps: {state['substeps']}"
+        panel["borde"] = f"borde: {borde}"
+        panel["cfl"] = (
             f"numero de difusion r = {numero_difusion:.3f}  "
             f"(estable si <= {CFL_MAXIMO})"
         )
-        panel.cfl.color = (130, 220, 130, 255) if estable else (255, 120, 120, 255)
+        panel.color("cfl", (130, 220, 130, 255) if estable else (255, 120, 120, 255))
         print(
             f"[difusion_calor] alpha={state['alpha']:.0f} substeps={state['substeps']} "
             f"borde={borde} r={numero_difusion:.3f} {'estable' if estable else 'INESTABLE'}"

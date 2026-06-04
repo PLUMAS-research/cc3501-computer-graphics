@@ -97,6 +97,30 @@ from examples.simplificacion_qem import simplificacion_qem
 
 grafica_cli.add_command(simplificacion_qem)
 
+from examples.curvas_parametricas import curvas_parametricas
+
+grafica_cli.add_command(curvas_parametricas)
+
+from examples.csg_raymarching import csg_raymarching
+
+grafica_cli.add_command(csg_raymarching)
+
+from examples.superficie_bezier import superficie_bezier
+
+grafica_cli.add_command(superficie_bezier)
+
+from examples.metaballs import metaballs
+
+grafica_cli.add_command(metaballs)
+
+from examples.cubo_gelatina import cubo_gelatina
+
+grafica_cli.add_command(cubo_gelatina)
+
+from examples.cubo_resortes import cubo_resortes
+
+grafica_cli.add_command(cubo_resortes)
+
 from examples.projection.app import projection_example
 
 grafica_cli.add_command(projection_example)

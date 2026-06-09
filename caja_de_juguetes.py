@@ -70,8 +70,13 @@ boids = importlib.import_module("examples.boids-abm.app")
 grafica_cli.add_command(boids.boids_abm)
 
 # TODO: hay que actualizar el código de este ejemplo
-# from examples.collision_detection.dino_runner import dino_game
-# grafica_cli.add_command(dino_game)
+from examples.collision_detection import dino_runner
+
+grafica_cli.add_command(dino_runner)
+
+from examples.katamari import katamari
+
+grafica_cli.add_command(katamari)
 
 from examples.ray_triangle import ray_triangle_example
 

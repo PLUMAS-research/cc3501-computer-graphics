@@ -3,6 +3,7 @@ Cálculo de curvaturas en mallas triangulares.
 Implementación simplificada usando método de cotangente (Meyer et al. 2003)
 """
 import numpy as np
+import scipy.sparse as sp
 
 
 def compute_vertex_areas(mesh):
@@ -229,46 +230,55 @@ def approximate_principal_directions(mesh, k1, k2):
     
     return d1, d2
 
-def smooth_vertex_attribute(mesh, attribute, iterations=3, lambda_factor=0.5):
+def build_smoothing_operator(mesh):
     """
-    Suavizado Laplaciano de un atributo por vértice.
-    
+    Construye el operador de promediado de vecinos como matriz dispersa.
+
+    Devuelve la matriz de adyacencia normalizada por filas A, donde
+    (A @ phi)[i] es el promedio de phi sobre los vecinos de i. Con ella el
+    suavizado laplaciano de un atributo es un producto matriz-vector, en vez
+    de un doble bucle en Python. El operador depende solo de la topología de la
+    malla, así que se construye una vez y se reusa en cada iteración y cada vez
+    que cambian las perillas de difusión.
+    """
+    N = len(mesh.vertices)
+    edges = mesh.edges_unique
+    rows = np.concatenate([edges[:, 0], edges[:, 1]])
+    cols = np.concatenate([edges[:, 1], edges[:, 0]])
+    adjacency = sp.csr_matrix(
+        (np.ones(len(rows)), (rows, cols)), shape=(N, N)
+    )
+    degree = np.asarray(adjacency.sum(axis=1)).ravel()
+    degree[degree == 0] = 1.0
+    return sp.diags(1.0 / degree) @ adjacency
+
+
+def smooth_vertex_attribute(mesh, attribute, iterations=3, lambda_factor=0.5, operator=None):
+    """
+    Suavizado laplaciano de un atributo por vértice.
+
+    Es una difusión sobre la variedad: cada iteración mezcla el valor del
+    vértice con el promedio de sus vecinos,
+
+        phi_i <- (1 - lambda) * phi_i + lambda * mean_{j in N(i)} phi_j,
+
+    que es Euler explícito de la ecuación del calor con el laplaciano de grafo
+    (compara con `difusion_calor`, que resuelve la misma ecuación sobre una
+    grilla 2D). El promedio de vecinos se escribe como `operator @ phi`.
+
     Args:
         mesh: trimesh object
         attribute: array (N,) con valores por vértice
-        iterations: número de iteraciones de suavizado
-        lambda_factor: factor de suavizado (0-1, menor = más suave)
-    
+        iterations: número de pasos de difusión
+        lambda_factor: factor de difusión (0-1, mayor = más suavizado por paso)
+        operator: matriz de promediado precalculada (ver build_smoothing_operator);
+                  si es None se construye al vuelo
+
     Returns:
         attribute_smooth: array suavizado
     """
-    N = len(mesh.vertices)
-    attribute_smooth = attribute.copy()
-    
-    # Construir vecindad
-    vertex_neighbors = [[] for _ in range(N)]
-    for face in mesh.faces:
-        for i in range(3):
-            v1, v2, v3 = face[i], face[(i+1)%3], face[(i+2)%3]
-            if v2 not in vertex_neighbors[v1]:
-                vertex_neighbors[v1].append(v2)
-            if v3 not in vertex_neighbors[v1]:
-                vertex_neighbors[v1].append(v3)
-    
+    averaging = operator if operator is not None else build_smoothing_operator(mesh)
+    phi = attribute.astype(float).copy()
     for _ in range(iterations):
-        attribute_new = attribute_smooth.copy()
-        
-        for i in range(N):
-            neighbors = vertex_neighbors[i]
-            if len(neighbors) == 0:
-                continue
-            
-            # Promedio de vecinos
-            neighbor_avg = np.mean(attribute_smooth[neighbors])
-            
-            # Suavizado: mezcla entre valor actual y promedio
-            attribute_new[i] = (1 - lambda_factor) * attribute_smooth[i] + lambda_factor * neighbor_avg
-        
-        attribute_smooth = attribute_new
-    
-    return attribute_smooth
+        phi = (1.0 - lambda_factor) * phi + lambda_factor * (averaging @ phi)
+    return phi

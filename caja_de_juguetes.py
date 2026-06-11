@@ -142,6 +142,10 @@ from examples.pymunk_pinball.app import pymunk_pinball
 
 grafica_cli.add_command(pymunk_pinball)
 
+from examples.raytracing_basico import raytracing_basico
+
+grafica_cli.add_command(raytracing_basico)
+
 from examples.raytracing_cpu.app import raytracing_cpu
 
 grafica_cli.add_command(raytracing_cpu)

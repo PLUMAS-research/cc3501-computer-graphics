@@ -54,36 +54,40 @@ def compute_radial_curvature(mesh, camera_pos, k1, k2, d1, d2):
 
 
 def extract_contour_points(mesh, kr, dkr, threshold=1e-6):
+    # Esta función corre cada frame (kr depende de la cámara), así que el test
+    # de cruce por cero se vectoriza sobre todas las aristas a la vez en vez de
+    # iterarlas en Python.
     edges = mesh.edges_unique
-    contour_points = []
-    contour_kr_values = []
-    
-    for edge in edges:
-        v1, v2 = edge
-        kr1, kr2 = kr[v1], kr[v2]
-        
-        if kr1 * kr2 < 0:
-            t = abs(kr1) / (abs(kr1) + abs(kr2))
-            
-            dkr_interp = (1 - t) * dkr[v1] + t * dkr[v2]
-            
-            if dkr_interp > threshold:
-                p1 = mesh.vertices[v1]
-                p2 = mesh.vertices[v2]
-                p_contour = (1 - t) * p1 + t * p2
-                contour_points.append(p_contour)
-                
-                # Guardar valor interpolado de kr (distancia a cero)
-                kr_interp = (1 - t) * kr1 + t * kr2
-                contour_kr_values.append(abs(kr_interp))
-    
-    if len(contour_points) == 0:
+    v1 = edges[:, 0]
+    v2 = edges[:, 1]
+    kr1 = kr[v1]
+    kr2 = kr[v2]
+
+    # Aristas con cruce por cero (kr de distinto signo en los extremos) cuya
+    # derivada direccional interpolada supera el umbral de visibilidad.
+    crossing = kr1 * kr2 < 0
+    abs1 = np.abs(kr1)
+    abs2 = np.abs(kr2)
+    denom = abs1 + abs2
+    denom[denom == 0] = 1.0
+    t = abs1 / denom
+    dkr_interp = (1 - t) * dkr[v1] + t * dkr[v2]
+    selected = crossing & (dkr_interp > threshold)
+
+    if not np.any(selected):
         return np.array([]), [], np.array([])
-    
-    contour_points = np.array(contour_points)
-    contour_kr_values = np.array(contour_kr_values)
+
+    ts = t[selected][:, np.newaxis]
+    p1 = mesh.vertices[v1[selected]]
+    p2 = mesh.vertices[v2[selected]]
+    contour_points = (1 - ts) * p1 + ts * p2
+
+    # Distancia a cero del kr interpolado: alimenta la transparencia.
+    kr_interp = (1 - t[selected]) * kr1[selected] + t[selected] * kr2[selected]
+    contour_kr_values = np.abs(kr_interp)
+
     contour_edges = chain_contour_segments(contour_points, max_distance=0.1)
-    
+
     return contour_points, contour_edges, contour_kr_values
 
 

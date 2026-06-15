@@ -50,9 +50,34 @@ def normalizar_simetrico(campo):
 @click.argument("model")
 @click.option("--width", type=int, default=960)
 @click.option("--height", type=int, default=960)
-def suggestive_contours(model, width, height):
+@click.option(
+    "--subdividir",
+    type=int,
+    default=0,
+    help="Pasos de subdivisión Loop antes de calcular curvaturas. Cada paso "
+    "cuadruplica las caras y suaviza la superficie, así aparecen contornos en "
+    "zonas que la malla original tenía demasiado gruesas (DeCarlo et al. 2003).",
+)
+def suggestive_contours(model, width, height, subdividir):
     print(f"Cargando {model}...")
     mesh = tm.load(model)
+
+    # Un OBJ con varias partes (como assets/samus/posed.obj) carga como Scene.
+    # El cálculo de curvatura de este ejemplo es por vértice, así que fusionamos
+    # las partes en una sola malla y el resto del código opera igual sobre
+    # vértices y caras. Las componentes desconectadas no interfieren entre sí.
+    if isinstance(mesh, tm.Scene):
+        print(f"OBJ con {len(mesh.geometry)} partes: fusionando en una sola malla...")
+        mesh = mesh.to_geometry()
+
+    # Subdivisión Loop opcional: agrega aristas y suaviza la superficie límite.
+    # Los contornos solo pueden caer en aristas donde kr cambia de signo, así que
+    # en mallas gruesas faltan; subdividir las hace representables. Usamos Loop
+    # (no midpoint) porque mueve los vértices al límite suave y mejora la
+    # estimación de curvatura, no solo la densidad de aristas.
+    if subdividir > 0:
+        print(f"Subdividiendo {subdividir} paso(s) (Loop)...")
+        mesh = mesh.subdivide_loop(iterations=subdividir)
 
     print("Normalizando geometría...")
     mesh.apply_translation(-mesh.centroid)
@@ -71,13 +96,6 @@ def suggestive_contours(model, width, height):
     # la topología). Cada perilla de suavizado lo reusa.
     print("Construyendo operador de difusión...")
     smoothing_operator = build_smoothing_operator(mesh)
-
-    print("Precalculando derivada de curvatura radial (posición inicial)...")
-    initial_camera_pos = np.array([0, 0, 3])
-    kr_initial = compute_radial_curvature(mesh, initial_camera_pos, k1_base, k2_base, d1, d2)
-    dkr = compute_radial_curvature_derivative(
-        mesh, initial_camera_pos, k1_base, k2_base, d1, d2, kr_initial
-    )
 
     window = pyglet.window.Window(width, height)
 
@@ -128,10 +146,9 @@ def suggestive_contours(model, width, height):
     show_mesh = True
     show_contours = True
     show_silhouettes = True
-    contour_threshold = 1e-6
     contour_count = 0
 
-    state = {"mode": MODO_PAPEL, "iters": 2, "lambda": 0.3}
+    state = {"mode": MODO_PAPEL, "iters": 2, "lambda": 0.3, "threshold": 0.1}
     # Curvaturas principales suavizadas según la perilla actual. Las llena
     # apply_state(); on_draw las usa para kr cada frame.
     campos = {"k1": k1_base.copy(), "k2": k2_base.copy()}
@@ -140,8 +157,9 @@ def suggestive_contours(model, width, height):
         InfoPanel(x=14, y_top=height - 22, background=(25, 22, 18))
         .add("modo")
         .add("difusion")
+        .add("umbral")
         .add("lineas")
-        .footer("V campo   , . iteraciones   - = lambda   M malla  C contornos  S siluetas  R reset")
+        .footer("V campo   , . iter   - = lambda   O P umbral   M malla  C contornos  S siluetas  R reset")
     )
 
     def apply_state():
@@ -175,7 +193,15 @@ def suggestive_contours(model, width, height):
             f"lambda={state['lambda']:.2f}"
         )
 
+    def apply_threshold():
+        # El umbral no toca las curvaturas (que sí dependen de la difusión), solo
+        # cuánta derivada radial exigimos para aceptar una arista como contorno.
+        # Por eso vive en su propia función ligera y no llama a apply_state().
+        panel["umbral"] = f"umbral seleccion contorno: {state['threshold']:.2f}"
+        print(f"[sugecon] umbral seleccion contorno={state['threshold']:.2f}")
+
     apply_state()
+    apply_threshold()
 
     @window.event
     def on_mouse_press(x, y, button, modifiers):
@@ -229,6 +255,14 @@ def suggestive_contours(model, width, height):
             state["lambda"] = min(1.0, round(state["lambda"] + 0.05, 2))
             apply_state()
 
+        elif symbol == pyglet.window.key.O:
+            state["threshold"] = max(0.0, round(state["threshold"] - 0.05, 2))
+            apply_threshold()
+
+        elif symbol == pyglet.window.key.P:
+            state["threshold"] = min(0.95, round(state["threshold"] + 0.05, 2))
+            apply_threshold()
+
     @window.event
     def on_draw():
         nonlocal contour_count
@@ -264,8 +298,14 @@ def suggestive_contours(model, width, height):
             mesh_gpu.draw(GL.GL_TRIANGLES)
 
         if show_contours:
+            # La derivada radial también depende de la cámara, así que se
+            # recalcula cada frame junto con kr (vectorizada, son pocos ms). El
+            # umbral de selección la compara con su propia escala robusta.
+            dkr = compute_radial_curvature_derivative(
+                mesh, camera_pos, campos["k1"], campos["k2"], d1, d2, kr
+            )
             contour_points, contour_edges, contour_kr_values = extract_contour_points(
-                mesh, kr, dkr, contour_threshold
+                mesh, kr, dkr, state["threshold"]
             )
             contour_count = len(contour_edges)
 
@@ -326,6 +366,7 @@ def suggestive_contours(model, width, height):
     print("  Mouse izquierdo: rotar   |   derecho: pan   |   scroll: zoom")
     print("  V: campo (papel / H / K / kr)")
     print("  , . : iteraciones de difusión   |   - = : factor lambda")
+    print("  O P : umbral de selección de contornos (derivada radial)")
     print("  M: malla   C: contornos   S: siluetas   R: reset cámara")
 
     pyglet.app.run()

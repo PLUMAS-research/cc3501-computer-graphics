@@ -24,6 +24,7 @@ from .contours import (
     extract_contour_points,
     extract_silhouette_edges,
     compute_radial_curvature_derivative,
+    extract_zero_crossings,
 )
 
 
@@ -32,6 +33,8 @@ MODOS = ["papel", "media (H)", "gaussiana (K)", "radial (kr)"]
 MODO_PAPEL, MODO_MEDIA, MODO_GAUSSIANA, MODO_RADIAL = 0, 1, 2, 3
 
 COLOR_TINTA = (0.15, 0.12, 0.10)
+COLOR_CRESTA = (0.75, 0.20, 0.15)  # rojo cálido, como el positivo del colormap
+COLOR_VALLE = (0.18, 0.30, 0.65)  # azul frío, como el negativo del colormap
 
 
 def normalizar_simetrico(campo):
@@ -146,7 +149,13 @@ def suggestive_contours(model, width, height, subdividir):
     show_mesh = True
     show_contours = True
     show_silhouettes = True
+    show_ridges = False
+    show_valleys = False
     contour_count = 0
+
+    # Crestas (k1=0) y valles (k2=0). No dependen de la cámara, así que se
+    # recalculan solo cuando cambia el suavizado (en apply_state), no por cuadro.
+    feature_lines = {"ridges": (np.array([]), []), "valleys": (np.array([]), [])}
 
     state = {"mode": MODO_PAPEL, "iters": 2, "lambda": 0.3, "threshold": 0.1}
     # Curvaturas principales suavizadas según la perilla actual. Las llena
@@ -159,7 +168,7 @@ def suggestive_contours(model, width, height, subdividir):
         .add("difusion")
         .add("umbral")
         .add("lineas")
-        .footer("V campo   , . iter   - = lambda   O P umbral   M malla  C contornos  S siluetas  R reset")
+        .footer("V campo  , . iter  - = lambda  O P umbral  M malla  C contornos  S siluetas  1 crestas  2 valles  R reset")
     )
 
     def apply_state():
@@ -174,6 +183,10 @@ def suggestive_contours(model, width, height, subdividir):
         )
         campos["k1"] = k1s
         campos["k2"] = k2s
+
+        # Crestas y valles con las curvaturas principales ya suavizadas.
+        feature_lines["ridges"] = extract_zero_crossings(mesh, k1s)
+        feature_lines["valleys"] = extract_zero_crossings(mesh, k2s)
 
         mesh_pipeline["fieldMode"] = state["mode"]
         if state["mode"] == MODO_MEDIA:
@@ -221,7 +234,7 @@ def suggestive_contours(model, width, height, subdividir):
 
     @window.event
     def on_key_press(symbol, modifiers):
-        nonlocal show_mesh, show_contours, show_silhouettes
+        nonlocal show_mesh, show_contours, show_silhouettes, show_ridges, show_valleys
 
         if symbol == pyglet.window.key.M:
             show_mesh = not show_mesh
@@ -231,6 +244,12 @@ def suggestive_contours(model, width, height, subdividir):
 
         elif symbol == pyglet.window.key.S:
             show_silhouettes = not show_silhouettes
+
+        elif symbol == pyglet.window.key._1:
+            show_ridges = not show_ridges
+
+        elif symbol == pyglet.window.key._2:
+            show_valleys = not show_valleys
 
         elif symbol == pyglet.window.key.R:
             arcball.reset()
@@ -358,7 +377,36 @@ def suggestive_contours(model, width, height, subdividir):
                 silhouette_gpu.draw(GL.GL_LINES)
                 silhouette_gpu.delete()
 
-        panel["lineas"] = f"contornos: {contour_count}   siluetas: {'ON' if show_silhouettes else 'OFF'}"
+        # Crestas y valles: líneas precalculadas (no dependen de la cámara). Se
+        # dibujan sin blending, como las siluetas, cada una con su color.
+        for activo, clave, color in (
+            (show_ridges, "ridges", COLOR_CRESTA),
+            (show_valleys, "valleys", COLOR_VALLE),
+        ):
+            if not activo:
+                continue
+            puntos, aristas = feature_lines[clave]
+            if len(puntos) == 0 or len(aristas) == 0:
+                continue
+            line_indices = np.array(aristas, dtype=np.uint32).flatten()
+            feature_gpu = contour_pipeline.vertex_list_indexed(
+                len(puntos), GL.GL_LINES, line_indices
+            )
+            feature_gpu.position[:] = puntos.flatten()
+
+            GL.glLineWidth(2.0)
+            contour_pipeline.use()
+            contour_pipeline["transform"] = np.eye(4, dtype=np.float32).reshape(16, 1, order="F")
+            contour_pipeline["view"] = current_view.astype(np.float32).reshape(16, 1, order="F")
+            contour_pipeline["projection"] = projection.reshape(16, 1, order="F")
+            contour_pipeline["color"] = color
+            feature_gpu.draw(GL.GL_LINES)
+            feature_gpu.delete()
+
+        panel["lineas"] = (
+            f"contornos: {contour_count}   siluetas: {'ON' if show_silhouettes else 'OFF'}"
+            f"   crestas: {'ON' if show_ridges else 'OFF'}   valles: {'ON' if show_valleys else 'OFF'}"
+        )
         with ui_overlay():
             panel.draw()
 
@@ -367,6 +415,7 @@ def suggestive_contours(model, width, height, subdividir):
     print("  V: campo (papel / H / K / kr)")
     print("  , . : iteraciones de difusión   |   - = : factor lambda")
     print("  O P : umbral de selección de contornos (derivada radial)")
+    print("  1: crestas (k1=0)   2: valles (k2=0)")
     print("  M: malla   C: contornos   S: siluetas   R: reset cámara")
 
     pyglet.app.run()

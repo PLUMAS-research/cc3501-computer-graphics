@@ -54,8 +54,9 @@ def compute_cotangent_weights(mesh):
 
 def compute_mean_curvature(mesh):
     vertices = mesh.vertices
+    normals = mesh.vertex_normals
     N = len(vertices)
-    
+
     print(f"    Calculando áreas de vértices...")
     vertex_areas = compute_vertex_areas(mesh)
     
@@ -91,10 +92,18 @@ def compute_mean_curvature(mesh):
         
         laplacian = np.sum(weights[:, np.newaxis] * diff, axis=0)
         laplacian_norm = np.linalg.norm(laplacian)
-        
+
         if vertex_areas[i] > 1e-10:
-            H[i] = laplacian_norm / (4.0 * vertex_areas[i])
-    
+            # El laplaciano cotangente es el vector de curvatura media: su norma
+            # da |H| y su orientación respecto a la normal da el signo. Con la
+            # malla orientada hacia afuera, L apunta contra la normal en zonas
+            # convexas, así que H = -sign(L·n)|L|/(4A) queda positivo en lo
+            # convexo y negativo en lo cóncavo. Sin el signo, H sería siempre
+            # positivo y k1 = H + sqrt(H^2-K) nunca cruzaría por cero (no habría
+            # crestas), además de dejar unilateral el mapa de color de H.
+            sign = -np.sign(np.dot(laplacian, normals[i]))
+            H[i] = sign * laplacian_norm / (4.0 * vertex_areas[i])
+
     return H
 
 

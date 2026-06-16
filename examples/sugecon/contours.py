@@ -107,6 +107,39 @@ def extract_contour_points(mesh, kr, dkr, threshold=0.0):
     return contour_points, contour_edges, contour_kr_values
 
 
+def extract_zero_crossings(mesh, field, max_distance=0.1):
+    """Líneas donde un campo escalar por vértice cruza por cero.
+
+    Para cada arista cuyos extremos tienen signo opuesto en `field` interpola
+    linealmente el punto de cruce y luego encadena los puntos con el mismo k-d
+    tree que usan los contornos sugestivos. A diferencia de estos, no hay
+    condición de derivada ni dependencia de la cámara: el resultado solo cambia
+    si cambia `field`.
+
+    Con field = k1 da las crestas y con field = k2 los valles (las líneas donde
+    una curvatura principal cambia de signo). Como k1 = 0 o k2 = 0 implica
+    curvatura gaussiana K = 0, son las curvas parabólicas que separan las zonas
+    elípticas de las hiperbólicas de la superficie.
+    """
+    edges = mesh.edges_unique
+    f1 = field[edges[:, 0]]
+    f2 = field[edges[:, 1]]
+
+    crossing = f1 * f2 < 0
+    if not np.any(crossing):
+        return np.array([]), []
+
+    v1 = edges[crossing, 0]
+    v2 = edges[crossing, 1]
+    abs1 = np.abs(f1[crossing])
+    abs2 = np.abs(f2[crossing])
+    t = (abs1 / (abs1 + abs2))[:, np.newaxis]
+    points = (1 - t) * mesh.vertices[v1] + t * mesh.vertices[v2]
+
+    segment_edges = chain_contour_segments(points, max_distance=max_distance)
+    return points, segment_edges
+
+
 def chain_contour_segments(points, max_distance=0.05):
     if len(points) < 2:
         return []

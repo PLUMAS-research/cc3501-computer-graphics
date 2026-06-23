@@ -226,6 +226,10 @@ from examples.edo_case_studies import edo_case_studies
 
 grafica_cli.add_command(edo_case_studies)
 
+from examples.esqueleto_lbs import esqueleto_lbs
+
+grafica_cli.add_command(esqueleto_lbs)
+
 from examples.animacion_esqueletica import animacion_esqueletica
 
 grafica_cli.add_command(animacion_esqueletica)

@@ -122,6 +122,10 @@ from examples.cubo_gelatina import cubo_gelatina
 
 grafica_cli.add_command(cubo_gelatina)
 
+from examples.raycasting_volumen import raycasting_volumen
+
+grafica_cli.add_command(raycasting_volumen)
+
 from examples.cubo_resortes import cubo_resortes
 
 grafica_cli.add_command(cubo_resortes)

@@ -70,14 +70,23 @@ class QuadTree:
         if not self.boundary.contains(x, y):
             return False
 
+        # Un nodo ya subdividido deriva directo a sus hijos: _subdivide dejo
+        # self.points vacio, y si volviera a llenarse el arbol dejaria de
+        # refinarse donde hay puntos nuevos.
+        if self.divided:
+            return (
+                self.nw.insert(x, y, datum)
+                or self.ne.insert(x, y, datum)
+                or self.sw.insert(x, y, datum)
+                or self.se.insert(x, y, datum)
+            )
+
         if len(self.points) < self.capacity or self.depth >= self.max_depth:
             self.points.append((x, y))
             self.data.append(datum)
             return True
 
-        if not self.divided:
-            self._subdivide()
-
+        self._subdivide()
         return (
             self.nw.insert(x, y, datum)
             or self.ne.insert(x, y, datum)

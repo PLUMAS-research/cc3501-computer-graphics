@@ -9,18 +9,21 @@ from grafica.utils import load_pipeline
 
 
 @click.command("sr_jengibre_numpy", short_help="Atractor Gingerbreadman generado con NumPy")
-@click.option("--width", default=512, help="Ancho de la textura")
-@click.option("--height", default=512, help="Alto de la textura")
-@click.option("--steps", default=500, help="Pasos por frame")
+@click.option("--width", default=800, help="Ancho de la textura")
+@click.option("--height", default=800, help="Alto de la textura")
+@click.option("--particles", type=int, default=20, help="Número de partículas")
+@click.option("--steps", default=200, help="Pasos por frame")
 @click.option("--flip/--no-flip", default=True,
               help="Voltear la textura verticalmente (np.flipud). "
                    "Con --flip, la fila 0 del array (y_min) queda arriba "
                    "(convención de imagen). Con --no-flip, y_min queda abajo "
                    "(convención matemática/OpenGL).")
-def gingerbread_numpy(width, height, steps, flip):
+def gingerbread_numpy(width, height, particles, steps, flip):
     
-    # Configuración del atractor. Usamos múltiples partículas para ver mejor
-    num_particles = 50
+    # Configuración del atractor. Usamos múltiples partículas para ver mejor.
+    # Los valores por omisión son los mismos de sr_jengibre, así que las dos
+    # versiones producen la misma imagen por caminos distintos.
+    num_particles = particles
     particles_x = np.random.uniform(-0.5, 0.5, num_particles)
     particles_y = np.random.uniform(-0.5, 0.5, num_particles)
     
@@ -41,14 +44,15 @@ def gingerbread_numpy(width, height, steps, flip):
         return x_new, y_new
     
     def world_to_pixel(x, y, width, height):
-        """Convierte coordenadas del espacio de fase a píxeles"""
-        px = int((x - x_min) / (x_max - x_min) * width)
-        py = int((y - y_min) / (y_max - y_min) * height)
-        
-        # Verificar límites
-        if 0 <= px < width and 0 <= py < height:
-            return px, py
-        return None, None
+        """Convierte coordenadas del espacio de fase a píxeles.
+
+        Recibe las posiciones de todas las partículas y devuelve, además de la
+        columna y la fila de cada una, cuáles caen dentro de la ventana.
+        """
+        px = ((x - x_min) / (x_max - x_min) * width).astype(int)
+        py = ((y - y_min) / (y_max - y_min) * height).astype(int)
+        dentro = (px >= 0) & (px < width) & (py >= 0) & (py < height)
+        return px, py, dentro
     
     def update_attractor(steps_count):
         nonlocal particles_x, particles_y
@@ -56,21 +60,26 @@ def gingerbread_numpy(width, height, steps, flip):
         points_added = 0
         
         for step in range(steps_count):
-            # Actualizar todas las partículas
-            for i in range(num_particles):
-                particles_x[i], particles_y[i] = gingerbread_step(particles_x[i], particles_y[i])
-                
-                px, py = world_to_pixel(particles_x[i], particles_y[i], width, height)
-                if px is not None and py is not None:
-                    # Saturar el valor para evitar que un píxel domine
-                    if accumulator[py, px] < max_value_per_pixel:
-                        accumulator[py, px] += 0.5
-                        points_added += 1
-                    
-                    # Si una partícula se sale del rango, reiniciarla
-                    if abs(particles_x[i]) > 20 or abs(particles_y[i]) > 20:
-                        particles_x[i] = np.random.uniform(-0.5, 0.5)
-                        particles_y[i] = np.random.uniform(-0.5, 0.5)
+            # un paso del mapa sobre todas las partículas a la vez
+            particles_x, particles_y = gingerbread_step(particles_x, particles_y)
+            
+            px, py, dentro = world_to_pixel(particles_x, particles_y, width, height)
+            
+            # np.add.at suma en su lugar y acepta índices repetidos: si dos
+            # partículas caen en el mismo píxel se cuentan las dos.
+            # Con accumulator[py, px] += 0.5 solo se contaría una.
+            np.add.at(accumulator, (py[dentro], px[dentro]), 0.5)
+            
+            # Saturar el valor para evitar que un píxel domine
+            np.clip(accumulator, 0.0, max_value_per_pixel, out=accumulator)
+            points_added += int(dentro.sum())
+            
+            # Las partículas que se van muy lejos vuelven al centro
+            escapadas = (np.abs(particles_x) > 20) | (np.abs(particles_y) > 20)
+            if escapadas.any():
+                cuantas = int(escapadas.sum())
+                particles_x[escapadas] = np.random.uniform(-0.5, 0.5, cuantas)
+                particles_y[escapadas] = np.random.uniform(-0.5, 0.5, cuantas)
         
         return points_added
     

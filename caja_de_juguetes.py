@@ -30,8 +30,10 @@ from examples.image_texture import image_viewer
 
 grafica_cli.add_command(image_viewer)
 
+from examples.lorenz import lorenz
 from examples.sr_jengibre import sr_jengibre
 
+grafica_cli.add_command(lorenz)
 grafica_cli.add_command(sr_jengibre)
 
 from examples.sr_jengibre_numpy import gingerbread_numpy
@@ -269,6 +271,10 @@ grafica_cli.add_command(pecera)
 from examples.bosque import bosque
 
 grafica_cli.add_command(bosque)
+
+from examples.lsystem import lsystem
+
+grafica_cli.add_command(lsystem)
 
 if __name__ == "__main__":
     grafica_cli()

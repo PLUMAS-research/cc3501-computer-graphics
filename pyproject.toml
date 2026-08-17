@@ -10,7 +10,7 @@ dependencies = [
     "mesa>=3.3.1",
     "networkx>=3.6.1",
     "numpy<2.4.0",
-    "pyglet>=2.1.13",
+    "pyglet==2.1.16",
     "pymunk>=7.2.0",
     "pyopengl>=3.1.10",
     "pyvista>=0.47.1",

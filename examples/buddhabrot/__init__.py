@@ -76,9 +76,11 @@ def compute_trajectories(num_samples, max_iter, real_min, real_max, imag_min, im
 
     points = np.vstack(all_points)
 
-    # Convertir de coordenadas del plano complejo a NDC [-1, 1]
-    normalized_x = 2.0 * (points[:, 0] - real_min) / (real_max - real_min) - 1.0
-    normalized_y = 2.0 * (points[:, 1] - imag_min) / (imag_max - imag_min) - 1.0
+    # Convertir de coordenadas del plano complejo a NDC [-1, 1].
+    # La parte imaginaria va al eje horizontal y la real al vertical, creciendo
+    # hacia abajo: así la figura queda de pie, que es como se muestra siempre.
+    normalized_x = 2.0 * (points[:, 1] - imag_min) / (imag_max - imag_min) - 1.0
+    normalized_y = 1.0 - 2.0 * (points[:, 0] - real_min) / (real_max - real_min)
 
     return np.column_stack([normalized_x, normalized_y]).astype(np.float32)
 
@@ -105,9 +107,10 @@ def buddhabrot(width, height, samples, max_iter_r, max_iter_g, max_iter_b):
     y alta frecuencia se separan cromáticamente.
     """
 
-    # Rango del plano complejo
-    real_min, real_max = -2.0, 1.0
-    imag_min, imag_max = -1.2, 1.2
+    # Rango del plano complejo. La parte real ocupa el eje vertical, así que
+    # este rectángulo se ve girado en la ventana.
+    real_min, real_max = -2.05, 0.75
+    imag_min, imag_max = -1.4, 1.4
 
     window = pyglet.window.Window(width, height, caption="Buddhabrot")
 

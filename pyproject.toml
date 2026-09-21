@@ -18,3 +18,11 @@ dependencies = [
     "sympy>=1.14.0",
     "trimesh>=4.11.3",
 ]
+
+# extra opcional: solo lo necesita el ejemplo webcam_esqueleto, que estima la
+# pose de una persona con la camara. Se instala con `uv sync --extra webcam`.
+[project.optional-dependencies]
+webcam = [
+    "mediapipe>=1.0",
+    "opencv-python>=4.10",
+]

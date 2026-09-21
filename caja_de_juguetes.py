@@ -168,6 +168,10 @@ from examples.carrusel import carrusel
 
 grafica_cli.add_command(carrusel)
 
+from examples.webcam_esqueleto import webcam_esqueleto
+
+grafica_cli.add_command(webcam_esqueleto)
+
 from examples.transformation_composition.app import compositions
 
 grafica_cli.add_command(compositions)

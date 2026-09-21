@@ -164,6 +164,10 @@ from examples.pokemon_instancing import pokemon_instancing
 
 grafica_cli.add_command(pokemon_instancing)
 
+from examples.carrusel import carrusel
+
+grafica_cli.add_command(carrusel)
+
 from examples.transformation_composition.app import compositions
 
 grafica_cli.add_command(compositions)

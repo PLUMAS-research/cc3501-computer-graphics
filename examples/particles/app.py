@@ -94,21 +94,27 @@ def particulas(width, height, max_ttl, emission_rate, max_particles, integrator)
     def apply_forces(sys, s):
         """Aplica todas las fuerzas sobre las partículas activas.
 
-        Escribe directamente en sys.acceleration[s]. Los arrays temporales
-        están preasignados para evitar allocaciones en cada frame.
+        El sistema preasigna sus arrays para max_particles, pero solo las
+        primeras sys.n partículas están vivas. `s` es el slice que las
+        selecciona (slice(0, sys.n)) y lo entrega el integrador: cada fuerza
+        se acumula en sys.acceleration[s] y así los slots muertos no se tocan.
+
+        Los arrays temporales están preasignados para evitar allocaciones en
+        cada frame, y por eso se recortan con [:n] en vez de [s].
         """
         n = sys.n
         pos = sys.position[s]
 
         # Masa como columna para broadcast: (n, 1)
         mass_col = _scratch_mass_col[:n]
-        mass_col[:, 0] = sys.mass[:n]
+        mass_col[:, 0] = sys.mass[s]
 
-        # 1. Gravedad
-        sys.acceleration[:n, 1] += -98.0
+        # 1. Gravedad. No se divide por la masa: la aceleración de gravedad
+        # no depende de ella.
+        sys.acceleration[s, 1] += -98.0
 
         # 2. Viento oscilante
-        sys.acceleration[:n, 0] += 20 * np.sin(time * 0.5)
+        sys.acceleration[s, 0] += 20 * np.sin(time * 0.5)
 
         # 3. Turbulencia aleatoria (in-place en scratch)
         turb = _scratch_turbulence[:n]

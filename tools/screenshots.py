@@ -73,6 +73,59 @@ RECETAS = {
         Toma(sufijo="colision", teclas=["C"] + ["Z"] * 8 + ["X"] * 6, cuadros=2),
     ],
     "animacion_esqueletica": [Toma(teclas=["PERIOD"] * 8, cuadros=2)],  # avanza la animacion
+    # transformaciones: el espirografo necesita acumular traza, y el conejo
+    # muestra el efecto de la coordenada w encendido y apagado
+    "spirograph": [Toma(cuadros=2700)],  # r/R = 0.35 cierra la curva a las 7 vueltas
+    "transformed_bunny": [
+        Toma(sufijo="ejes", teclas=["A"], cuadros=90),
+        Toma(sufijo="homogeneo", teclas=["A", "H"], cuadros=90),
+    ],
+    "compositions": [Toma(cuadros=150)],
+    # vistas y proyecciones: la misma escena bajo cada proyeccion, el frustum
+    # visto desde afuera y la interpolacion con y sin correccion de perspectiva
+    "projection_example": [
+        Toma(sufijo="perspectiva", cuadros=30),
+        Toma(sufijo="isometrica", teclas=["P"], cuadros=30),
+        Toma(sufijo="fov-amplio", teclas=["EQUAL"] * 10, cuadros=30),
+    ],
+    "camera_frustum": [Toma(cuadros=45)],
+    # grafos de escena: la jerarquia orbital, el instanciamiento y la bola que
+    # va adoptando objetos como hijos
+    "solar_system": [Toma(cuadros=200)],
+    "pokemon_instancing": [Toma(cuadros=30)],
+    "carrusel": [
+        Toma(cuadros=110),
+        Toma(sufijo="orden-malo", teclas=["O"], cuadros=110),
+        Toma(sufijo="sin-orden", teclas=["T", "M"], cuadros=110),
+        Toma(sufijo="un-caballito", args=["--caballitos", "1"], cuadros=110),
+    ],
+    # la fuente sintetica corre sin camara ni mediapipe, asi que la captura
+    # automatica no depende del extra opcional
+    "webcam_esqueleto": [
+        Toma(args=["--fuente", "demo"], cuadros=140),
+        Toma(sufijo="crudo", args=["--fuente", "demo"], teclas=["J"], cuadros=140),
+    ],
+    "katamari": [Toma(cuadros=120)],
+    "sistema_tierra": [Toma(cuadros=120)],
+    # el resto de la parte de graficacion: arcball, profundidad y transparencia,
+    # iluminacion y shadow mapping
+    "bosque": [Toma(cuadros=40)],
+    "pecera": [Toma(cuadros=40)],
+    "phong_basico": [Toma(cuadros=30)],
+    "disco_bunny": [Toma(cuadros=30)],
+    "cel_bunny": [Toma(cuadros=30)],
+    "shadow_mapping": [Toma(cuadros=40)],
+    "perspective_correction": [
+        Toma(sufijo="correcta", teclas=["D"], cuadros=2),
+        Toma(sufijo="afin", teclas=["D", "SPACE"], cuadros=2),
+    ],
+    # gimbal lock: las teclas quedan presionadas, asi que el angulo sale de
+    # ROTATION_SPEED (1,5 rad/s) por la cantidad de cuadros. 63 cuadros dan 90
+    # grados de pitch, que es donde los ejes de yaw y roll se alinean.
+    "gimbal_lock": [
+        Toma(sufijo="libre", cuadros=2),
+        Toma(sufijo="bloqueado", teclas=["UP"], cuadros=63),
+    ],
     "lsystem": [
         Toma(sufijo="arbol", cuadros=2),
         Toma(sufijo="monopodial", args=["--especie", "monopodial"], cuadros=2),

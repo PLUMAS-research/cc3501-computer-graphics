@@ -6,6 +6,41 @@ import numpy as np
 from grafica.textures import texture_2D_setup
 
 
+def _material_from_visual(visual):
+    """
+    Extrae las propiedades de un material Wavefront (Ka, Kd, Ks, Ns) desde el
+    visual de trimesh y las devuelve con los nombres de uniform que usan los
+    shaders del curso: material_ambient, material_diffuse, material_specular
+    (vec3 en [0, 1]) y material_shininess (float).
+
+    Devuelve un diccionario vacío si la malla no tiene material (por ejemplo,
+    un STL o un OFF sin archivo .mtl asociado).
+    """
+    material = getattr(visual, "material", None)
+    if material is None:
+        return {}
+
+    # Un material PBR (glTF) se aproxima a Phong con la conversión de trimesh.
+    if hasattr(material, "to_simple"):
+        material = material.to_simple()
+
+    def como_vec3(color):
+        if color is None:
+            return None
+        return (np.asarray(color, dtype=np.float32)[:3] / 255.0).astype(np.float32)
+
+    propiedades = {
+        "material_ambient": como_vec3(getattr(material, "ambient", None)),
+        "material_diffuse": como_vec3(getattr(material, "diffuse", None)),
+        "material_specular": como_vec3(getattr(material, "specular", None)),
+        "material_shininess": getattr(material, "glossiness", None),
+    }
+    if propiedades["material_shininess"] is not None:
+        propiedades["material_shininess"] = float(propiedades["material_shininess"])
+
+    return {k: v for k, v in propiedades.items() if v is not None}
+
+
 def _node_from_mesh(mesh, id=None, parent=None, transform=None, fix_normals=False, smooth=False, smooth_threshold=100000, force_color=None, invert_normals=False):
     """
     Crea un nodo a partir de una malla.
@@ -62,6 +97,10 @@ def _node_from_mesh(mesh, id=None, parent=None, transform=None, fix_normals=Fals
         'children': [],
         'parent': parent,
         'has_texture': False,
+        # Propiedades del material (.mtl): render() las pasa como uniforms a
+        # los shaders que las declaren. Los atributos de instancia tienen
+        # prioridad sobre ellas.
+        'material': _material_from_visual(mesh.visual),
     }
 
     # Manejar la textura si existe
@@ -156,6 +195,7 @@ def _node_from_file(filename, id=None, parent=None, rezero=True, normalize=True,
         'children': [],
         'parent': parent,
         'has_texture': False,
+        'material': {},
         'object': scene
     }
 

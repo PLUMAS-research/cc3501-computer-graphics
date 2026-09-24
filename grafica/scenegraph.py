@@ -209,6 +209,19 @@ class Scenegraph(nx.DiGraph):
                 except pyglet.graphics.shader.ShaderException as e:
                     pass 
 
+                # Propiedades del material del archivo (.mtl): se envían solo a
+                # los shaders que declaran el uniform correspondiente. Van antes
+                # de los atributos de instancia para que estos las sobreescriban.
+                for attr, value in (current_node.get("material") or {}).items():
+                    if "instance_attributes" in current_node and attr in current_node["instance_attributes"]:
+                        continue
+                    if not isinstance(value, (float, int)):
+                        value = value.reshape(value.size, 1, order="F")
+                    try:
+                        current_pipeline[attr] = value
+                    except pyglet.graphics.shader.ShaderException:
+                        continue
+
                 # Aplicar atributos de instancia
                 if "instance_attributes" in current_node:
                     instance_attrs = current_node["instance_attributes"]

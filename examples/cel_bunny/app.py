@@ -40,10 +40,12 @@ MATERIALES = {
 
 ORDEN_MATERIALES = ["rojo", "verde", "azul"]
 
-# Dos modelos para el mismo sombreado. El conejo no tiene mapa difuso, así que
-# su color base es un uniform y las teclas 1 a 3 lo cambian. Samus sí lo tiene,
-# y ahí el color base sale de la textura: lo que se cuantiza es la iluminación,
-# que es como trabajan los juegos con este estilo.
+# Dos modelos para el mismo sombreado. El conejo (STL) no trae material, así
+# que el suyo es un uniform y las teclas 1 a 3 lo cambian. Samus viene con un
+# archivo .mtl que define Ka, Kd, Ks y Ns por parte (PowerSuit, Gun, etc.) más
+# un mapa difuso: el grafo de escena envía esas propiedades al shader y el color
+# base es Kd por el téxel. Lo que se cuantiza es la iluminación, que es como
+# trabajan los juegos con este estilo.
 MODELOS = {
     "bunny": {
         "archivo": "assets/Stanford_Bunny.stl",
@@ -112,16 +114,16 @@ def cel_bunny(width, height, modelo):
     altura_base = -esquinas[0][eje_vertical] / 2
 
     def propiedades_de(nombre):
-        """Los uniforms del material que el shader en uso declara.
+        """Los uniforms de material que se fijan por instancia.
 
-        El shader con textura no tiene `material_diffuse`, porque su color base
-        lo entrega el mapa difuso; pasárselo igual aborta el render, ya que los
-        atributos de instancia no se validan contra el shader.
+        Para el modelo con textura no se fija ninguno: los atributos de
+        instancia tienen prioridad sobre el material del archivo, así que
+        pasarlos taparía los valores del .mtl y editar ese archivo no tendría
+        efecto.
         """
-        propiedades = {k: v for k, v in MATERIALES[nombre].items() if k != "label"}
         if con_textura:
-            propiedades.pop("material_diffuse")
-        return propiedades
+            return {}
+        return {k: v for k, v in MATERIALES[nombre].items() if k != "label"}
 
     material_actual = ORDEN_MATERIALES[0]
     graph.add_object(
@@ -202,8 +204,8 @@ def cel_bunny(width, height, modelo):
         color=(255, 255, 255, 255),
     )
     instrucciones = pyglet.text.Label(
-        "1: rojo  2: verde  3: azul     b: bandas (2/3/4)    o: outline on/off"
-        "    --modelo bunny|samus",
+        "1/2/3: material (solo bunny)   b: bandas (2/3/4)   o: outline on/off"
+        "   --modelo bunny|samus",
         font_name="Fira Code",
         font_size=11,
         x=12,
@@ -219,7 +221,7 @@ def cel_bunny(width, height, modelo):
             if clave.startswith("modelo_mesh"):
                 graph.apply_instance_attributes(clave, **propiedades)
         if con_textura:
-            label_material.text = "Color base: mapa difuso del modelo"
+            label_material.text = "Material: Kd, Ks y Ns del archivo .mtl por el mapa difuso"
         else:
             label_material.text = f"Material: {MATERIALES[nombre]['label']}"
 

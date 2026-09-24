@@ -16,6 +16,9 @@ uniform vec3 light_2_color;
 uniform vec3 ambient_light;
 
 uniform sampler2D diffuse_texture;
+// Kd, Ks y Ns del archivo .mtl: el grafo de escena los envía por cada parte
+// del modelo (PowerSuit, Gun, etc.) a partir del material que trae la malla.
+uniform vec3 material_diffuse;
 uniform vec3 material_specular;
 uniform float material_shininess;
 
@@ -62,10 +65,10 @@ void main()
         return;
     }
 
-    // El color base sale del mapa difuso del modelo. Lo que se cuantiza es la
-    // iluminación, no la textura: el téxel entra entero y el escalón lo pone
-    // el factor difuso.
-    vec3 base_color = texture(diffuse_texture, fragment_texcoord).rgb;
+    // El color base es el mapa difuso modulado por Kd, como define Wavefront:
+    // el téxel entra entero y Kd lo escala (con Kd negro la parte no refleja
+    // luz difusa). Lo que se cuantiza es la iluminación, no la textura.
+    vec3 base_color = material_diffuse * texture(diffuse_texture, fragment_texcoord).rgb;
 
     vec3 ambient = ambient_light * base_color;
     vec3 light_1 = cel_light(base_color, normal, view_direction, light_1_position, light_1_color);

@@ -12,6 +12,7 @@ newmtl LightHand
 	Kd 0.8000 0.8000 0.8000
 	Ks 0.2000 0.2000 0.2000
 	Ke 0.0000 0.0000 0.0000
+	map_Kd PowerSuit.png
 
 newmtl Gun
 	Ns 43.2193
@@ -24,6 +25,7 @@ newmtl Gun
 	Kd 0.8000 0.8000 0.8000
 	Ks 0.2000 0.2000 0.2000
 	Ke 0.0000 0.0000 0.0000
+	map_Kd PowerGun.png
 
 newmtl PowerSuit
 	Ns 43.2193
@@ -36,6 +38,7 @@ newmtl PowerSuit
 	Kd 0.8000 0.8000 0.8000
 	Ks 0.2000 0.2000 0.2000
 	Ke 0.0000 0.0000 0.0000
+	map_Kd PowerSuit.png
 
 newmtl Light
 	Ns 43.2193
@@ -48,3 +51,4 @@ newmtl Light
 	Kd 0.8000 0.8000 0.8000
 	Ks 0.2000 0.2000 0.2000
 	Ke 0.0000 0.0000 0.0000
+	map_Kd PowerSuit.png

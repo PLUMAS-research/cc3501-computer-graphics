@@ -40,11 +40,37 @@ MATERIALES = {
 
 ORDEN_MATERIALES = ["rojo", "verde", "azul"]
 
+# Dos modelos para el mismo sombreado. El conejo no tiene mapa difuso, así que
+# su color base es un uniform y las teclas 1 a 3 lo cambian. Samus sí lo tiene,
+# y ahí el color base sale de la textura: lo que se cuantiza es la iluminación,
+# que es como trabajan los juegos con este estilo.
+MODELOS = {
+    "bunny": {
+        "archivo": "assets/Stanford_Bunny.stl",
+        "orientacion": tr.identity(),
+        "camara": np.array([-2.0, 0.0, 0.75], dtype=np.float32),
+        "altura_camara": 0.5,
+    },
+    "samus": {
+        # El modelo viene con el eje Y hacia arriba y la escena trabaja con Z.
+        "archivo": "assets/samus/posed.obj",
+        "orientacion": tr.rotationX(np.pi / 2),
+        "camara": np.array([-2.6, 0.0, 1.1], dtype=np.float32),
+        "altura_camara": 0.85,
+    },
+}
+
 
 @click.command("cel_bunny", short_help="Cel-shading sobre el conejo de Stanford")
 @click.option("--width", type=int, default=960)
 @click.option("--height", type=int, default=960)
-def cel_bunny(width, height):
+@click.option(
+    "--modelo",
+    type=click.Choice(sorted(MODELOS)),
+    default="bunny",
+    help="Modelo a sombrear: el conejo sin textura o Samus con su mapa difuso",
+)
+def cel_bunny(width, height, modelo):
     window = pyglet.window.Window(width, height)
 
     pyglet.font.add_file(
@@ -53,32 +79,58 @@ def cel_bunny(width, height):
 
     graph = Scenegraph("root")
 
-    graph.load_and_register_mesh("stanford_bunny", "assets/Stanford_Bunny.stl")
+    configuracion = MODELOS[modelo]
+    con_textura = modelo != "bunny"
+
+    graph.load_and_register_mesh("modelo", configuracion["archivo"])
     graph.load_and_register_mesh("sphere", "assets/sphere.off")
 
-    cel_pipeline = load_pipeline(
-        Path(os.path.dirname(__file__)) / "cel_vertex_program.glsl",
-        Path(os.path.dirname(__file__)) / "cel_fragment_program.glsl",
-    )
+    here = Path(os.path.dirname(__file__))
+    if con_textura:
+        cel_pipeline = load_pipeline(
+            here / "cel_textured_vertex_program.glsl",
+            here / "cel_textured_fragment_program.glsl",
+        )
+    else:
+        cel_pipeline = load_pipeline(
+            here / "cel_vertex_program.glsl",
+            here / "cel_fragment_program.glsl",
+        )
     bulb_pipeline = load_pipeline(
-        Path(os.path.dirname(__file__)) / "bulb_vertex_program.glsl",
-        Path(os.path.dirname(__file__)) / "bulb_fragment_program.glsl",
+        here / "bulb_vertex_program.glsl",
+        here / "bulb_fragment_program.glsl",
     )
 
     graph.register_pipeline("cel_pipeline", cel_pipeline)
     graph.register_pipeline("bulb_pipeline", bulb_pipeline)
 
-    bunny_min_z = graph.meshes["stanford_bunny"]["object"].bounds[0][2]
-    bunny_base_height = -bunny_min_z / 2
+    # La malla llega centrada en el origen; se sube la mitad de su alto para
+    # que quede apoyada sobre el plano z = 0, sea cual sea el modelo.
+    esquinas = graph.meshes["modelo"]["object"].bounds
+    orientacion = configuracion["orientacion"]
+    eje_vertical = 2 if modelo == "bunny" else 1
+    altura_base = -esquinas[0][eje_vertical] / 2
+
+    def propiedades_de(nombre):
+        """Los uniforms del material que el shader en uso declara.
+
+        El shader con textura no tiene `material_diffuse`, porque su color base
+        lo entrega el mapa difuso; pasárselo igual aborta el render, ya que los
+        atributos de instancia no se validan contra el shader.
+        """
+        propiedades = {k: v for k, v in MATERIALES[nombre].items() if k != "label"}
+        if con_textura:
+            propiedades.pop("material_diffuse")
+        return propiedades
 
     material_actual = ORDEN_MATERIALES[0]
     graph.add_object(
-        "bunny",
-        "stanford_bunny",
+        "modelo",
+        "modelo",
         "cel_pipeline",
         parent="root",
-        transform=tr.translate(0, 0, bunny_base_height),
-        **{k: v for k, v in MATERIALES[material_actual].items() if k != "label"},
+        transform=tr.translate(0, 0, altura_base) @ orientacion,
+        **propiedades_de(material_actual),
     )
 
     bulb_scale = 0.15
@@ -98,10 +150,10 @@ def cel_bunny(width, height):
         bulb_color=bulb_2_color,
     )
 
-    camera_position = np.array([-2.0, 0, 0.75], dtype=np.float32)
+    camera_position = configuracion["camara"]
     view = tr.lookAt(
         camera_position,
-        np.array([0, 0.0, 0.5]),
+        np.array([0.0, 0.0, configuracion["altura_camara"]]),
         np.array([0.0, 0.0, 1.0]),
     )
     projection = tr.perspective(60, width / height, 0.001, 5.0)
@@ -150,7 +202,8 @@ def cel_bunny(width, height):
         color=(255, 255, 255, 255),
     )
     instrucciones = pyglet.text.Label(
-        "1: rojo  2: verde  3: azul     b: bandas (2/3/4)    o: outline on/off",
+        "1: rojo  2: verde  3: azul     b: bandas (2/3/4)    o: outline on/off"
+        "    --modelo bunny|samus",
         font_name="Fira Code",
         font_size=11,
         x=12,
@@ -161,9 +214,14 @@ def cel_bunny(width, height):
     def aplicar_material(nombre):
         nonlocal material_actual
         material_actual = nombre
-        propiedades = {k: v for k, v in MATERIALES[nombre].items() if k != "label"}
-        graph.apply_instance_attributes("bunny_mesh", **propiedades)
-        label_material.text = f"Material: {MATERIALES[nombre]['label']}"
+        propiedades = propiedades_de(nombre)
+        for clave in graph.nodes:
+            if clave.startswith("modelo_mesh"):
+                graph.apply_instance_attributes(clave, **propiedades)
+        if con_textura:
+            label_material.text = "Color base: mapa difuso del modelo"
+        else:
+            label_material.text = f"Material: {MATERIALES[nombre]['label']}"
 
     def actualizar_etiquetas():
         label_bandas.text = f"Bandas de difusa: {num_bands}"
@@ -220,8 +278,10 @@ def cel_bunny(width, height):
         nonlocal total_time
         total_time += dt
 
-        graph.nodes["bunny"]["transform"] = (
-            tr.translate(0, 0, bunny_base_height) @ tr.rotationZ(total_time * 0.5)
+        graph.nodes["modelo"]["transform"] = (
+            tr.translate(0, 0, altura_base)
+            @ tr.rotationZ(total_time * 0.5)
+            @ orientacion
         )
 
         radio_base = 0.8

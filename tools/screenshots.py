@@ -121,7 +121,10 @@ RECETAS = {
     "pecera": [Toma(cuadros=40)],
     "phong_basico": [Toma(cuadros=30)],
     "disco_bunny": [Toma(cuadros=30)],
-    "cel_bunny": [Toma(cuadros=30)],
+    "cel_bunny": [
+        Toma(cuadros=30),
+        Toma(sufijo="samus", args=["--modelo", "samus"], cuadros=30),
+    ],
     "shadow_mapping": [Toma(cuadros=40)],
     "perspective_correction": [
         Toma(sufijo="correcta", teclas=["D"], cuadros=2),

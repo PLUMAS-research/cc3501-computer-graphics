@@ -79,6 +79,11 @@ def _node_from_mesh(mesh, id=None, parent=None, transform=None, fix_normals=Fals
         colors[:] = force_color
         node['attributes']['color'] = colors.flatten()
         print(f"Aplicando color forzado al modelo: {force_color}")
+    elif node['has_texture']:
+        # En una malla con mapa difuso, vertex_list[6] son las coordenadas de
+        # textura y no un color por vertice: intentar leerlo como color avisa
+        # de un formato desconocido (t2f) una vez por submalla.
+        pass
     else:
         # Procesar el color original como antes
         if len(vertex_list) > 6:

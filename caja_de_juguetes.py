@@ -92,6 +92,10 @@ from examples.shadows import shadow_mapping
 
 grafica_cli.add_command(shadow_mapping)
 
+from examples.ssao import ssao
+
+grafica_cli.add_command(ssao)
+
 from examples.terrain import terrain_generation
 
 grafica_cli.add_command(terrain_generation)

@@ -106,6 +106,14 @@ RECETAS = {
         Toma(sufijo="crudo", args=["--fuente", "demo"], teclas=["J"], cuadros=140),
     ],
     "katamari": [Toma(cuadros=120)],
+    "ssao": [
+        Toma(cuadros=2),
+        Toma(sufijo="sin-oclusion", teclas=["O"], cuadros=2),
+        Toma(sufijo="factor", teclas=["SPACE"], cuadros=2),
+        Toma(sufijo="sin-desenfoque", teclas=["B", "SPACE"], cuadros=2),
+        Toma(sufijo="normales", teclas=["SPACE", "SPACE"], cuadros=2),
+        Toma(sufijo="posiciones", teclas=["SPACE", "SPACE", "SPACE"], cuadros=2),
+    ],
     "sistema_tierra": [Toma(cuadros=120)],
     # el resto de la parte de graficacion: arcball, profundidad y transparencia,
     # iluminacion y shadow mapping

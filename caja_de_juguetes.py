@@ -4,293 +4,245 @@ import importlib
 
 import click
 
+# título de cada sección de la ayuda -> comandos que muestra, en orden
+UNIDADES = {}
 
-@click.group()
+
+class CajaDeJuguetes(click.Group):
+    """Grupo de comandos que lista los ejemplos agrupados por unidad del curso."""
+
+    def format_commands(self, ctx, formatter):
+        ancho = max(len(nombre) for nombre in self.commands)
+        limite = formatter.width - 6 - ancho
+        for unidad, comandos in UNIDADES.items():
+            filas = [
+                (comando.name.ljust(ancho), comando.get_short_help_str(limite))
+                for comando in comandos
+            ]
+            with formatter.section(unidad):
+                formatter.write_dl(filas)
+
+
+@click.group(cls=CajaDeJuguetes)
 def grafica_cli():
     pass
 
 
-from examples.image_pixel import image_pixel_viewer
+def registrar(unidad, *comandos):
+    for comando in comandos:
+        grafica_cli.add_command(comando)
+    UNIDADES.setdefault(unidad, []).extend(comandos)
 
-grafica_cli.add_command(image_pixel_viewer)
-
-from examples.color import color_wheel
-
-grafica_cli.add_command(color_wheel)
-
-from examples.hello_world import hola_mundo
-
-grafica_cli.add_command(hola_mundo)
 
 from examples.chroma_key import chroma_key
-
-grafica_cli.add_command(chroma_key)
-
-from examples.image_texture import image_viewer
-
-grafica_cli.add_command(image_viewer)
-
-from examples.lorenz import lorenz
-from examples.sr_jengibre import sr_jengibre
-
-grafica_cli.add_command(lorenz)
-grafica_cli.add_command(sr_jengibre)
-
-from examples.sr_jengibre_numpy import gingerbread_numpy
-
-grafica_cli.add_command(gingerbread_numpy)
-
-from examples.particles.app import particulas
-
-grafica_cli.add_command(particulas)
-
-# la carpeta tiene un guion :) así que hay que usar otro método
-boids = importlib.import_module("examples.boids-particles")
-grafica_cli.add_command(boids.boids_particles)
-
-from examples.arcball import arcball_example
-
-grafica_cli.add_command(arcball_example)
-
-from examples.cloth.app_pymunk import cloth_pymunk
-
-grafica_cli.add_command(cloth_pymunk)
-
-from examples.cloth.app_verlet import cloth_verlet
-
-grafica_cli.add_command(cloth_verlet)
-
-from examples.masa_resorte import masa_resorte
-
-grafica_cli.add_command(masa_resorte)
-
-from examples.difusion_calor import difusion_calor
-
-grafica_cli.add_command(difusion_calor)
-
-boids = importlib.import_module("examples.boids-abm.app")
-grafica_cli.add_command(boids.boids_abm)
-
-# TODO: hay que actualizar el código de este ejemplo
-from examples.collision_detection import dino_runner
-
-grafica_cli.add_command(dino_runner)
-
-from examples.katamari import katamari
-
-grafica_cli.add_command(katamari)
-
-from examples.ray_triangle import ray_triangle_example
-
-grafica_cli.add_command(ray_triangle_example)
-
-from examples.hello_opengl import hola_opengl
-
-grafica_cli.add_command(hola_opengl)
-
-from examples.shadows import shadow_mapping
-
-grafica_cli.add_command(shadow_mapping)
-
-from examples.cascaded_shadows import cascaded_shadows
-
-grafica_cli.add_command(cascaded_shadows)
-
-from examples.ssao import ssao
-
-grafica_cli.add_command(ssao)
-
-from examples.terrain import terrain_generation
-
-grafica_cli.add_command(terrain_generation)
-
-from examples.operaciones_malla import operaciones_malla
-
-grafica_cli.add_command(operaciones_malla)
-
-from examples.simplificacion_qem import simplificacion_qem
-
-grafica_cli.add_command(simplificacion_qem)
-
-from examples.curvas_parametricas import curvas_parametricas
-
-grafica_cli.add_command(curvas_parametricas)
-
-from examples.csg_raymarching import csg_raymarching
-
-grafica_cli.add_command(csg_raymarching)
-
-from examples.superficie_bezier import superficie_bezier
-
-grafica_cli.add_command(superficie_bezier)
-
-from examples.metaballs import metaballs
-
-grafica_cli.add_command(metaballs)
-
-from examples.cubo_gelatina import cubo_gelatina
-
-grafica_cli.add_command(cubo_gelatina)
-
-from examples.raycasting_volumen import raycasting_volumen
-
-grafica_cli.add_command(raycasting_volumen)
-
-from examples.cubo_resortes import cubo_resortes
-
-grafica_cli.add_command(cubo_resortes)
-
-from examples.projection.app import projection_example
-
-grafica_cli.add_command(projection_example)
-
-from examples.pymunk_boxes.app import falling_boxes
-
-grafica_cli.add_command(falling_boxes)
-
-from examples.pymunk_basico.app import pymunk_basico
-
-grafica_cli.add_command(pymunk_basico)
-
-from examples.pymunk_pinball.app import pymunk_pinball
-
-grafica_cli.add_command(pymunk_pinball)
-
-from examples.raytracing_basico import raytracing_basico
-
-grafica_cli.add_command(raytracing_basico)
-
-from examples.raytracing_cpu.app import raytracing_cpu
-
-grafica_cli.add_command(raytracing_cpu)
-
-from examples.scene_graphs.app import solar_system
-
-grafica_cli.add_command(solar_system)
-
-from examples.pokemon_instancing import pokemon_instancing
-
-grafica_cli.add_command(pokemon_instancing)
-
-from examples.carrusel import carrusel
-
-grafica_cli.add_command(carrusel)
-
-from examples.webcam_esqueleto import webcam_esqueleto
-
-grafica_cli.add_command(webcam_esqueleto)
-
-from examples.transformation_composition.app import compositions
-
-grafica_cli.add_command(compositions)
-
-from examples.transformations.app import transformed_bunny
-
-grafica_cli.add_command(transformed_bunny)
-
-from examples.spirograph import spirograph
-
-grafica_cli.add_command(spirograph)
-
-from examples.gimbal_lock import gimbal_lock
-
-grafica_cli.add_command(gimbal_lock)
-
-from examples.phong_basico import phong_basico
-
-grafica_cli.add_command(phong_basico)
-
-from examples.disco_bunny.app import disco_bunny
-
-grafica_cli.add_command(disco_bunny)
-
-from examples.cel_bunny import cel_bunny
-
-grafica_cli.add_command(cel_bunny)
-
-from examples.sistema_tierra import sistema_tierra
-
-grafica_cli.add_command(sistema_tierra)
-
-from examples.camera_path import camera_path
-
-grafica_cli.add_command(camera_path)
-
-from examples.camera_frustum import camera_frustum
-
-grafica_cli.add_command(camera_frustum)
-
-from examples.pyvista_orbital import orbital
-
-grafica_cli.add_command(orbital)
-
-from examples.sugecon import suggestive_contours
-
-grafica_cli.add_command(suggestive_contours)
-
 from examples.degradado import degradado
 
-grafica_cli.add_command(degradado)
+registrar("Unidad 2. Imágenes, píxeles y colores", degradado, chroma_key)
 
 from examples.bad_tv import bad_tv
+from examples.color import color_wheel
+from examples.hello_world import hola_mundo
 
-grafica_cli.add_command(bad_tv)
+registrar("Unidad 3. GPU y rendering con OpenGL", hola_mundo, color_wheel, bad_tv)
 
 from examples.buddhabrot import buddhabrot
+from examples.image_pixel import image_pixel_viewer
+from examples.image_texture import image_viewer
+from examples.lorenz import lorenz
+from examples.sr_jengibre import sr_jengibre
+from examples.sr_jengibre_numpy import gingerbread_numpy
 
-grafica_cli.add_command(buddhabrot)
-
-from examples.flappy_redpanda.app import flappy_redpanda
-
-grafica_cli.add_command(flappy_redpanda)
+registrar(
+    "Unidad 4. Texturas y atractores",
+    image_pixel_viewer,
+    image_viewer,
+    gingerbread_numpy,
+    sr_jengibre,
+    lorenz,
+    buddhabrot,
+)
 
 from examples.edo_case_studies import edo_case_studies
+from examples.flappy_redpanda.app import flappy_redpanda
+from examples.particles.app import particulas
 
-grafica_cli.add_command(edo_case_studies)
+registrar("Unidad 5. EDO y partículas", edo_case_studies, flappy_redpanda, particulas)
 
-from examples.esqueleto_lbs import esqueleto_lbs
-
-grafica_cli.add_command(esqueleto_lbs)
-
-from examples.animacion_esqueletica import animacion_esqueletica
-
-grafica_cli.add_command(animacion_esqueletica)
-
-from examples.skinning import skinning
-
-grafica_cli.add_command(skinning)
-
+# las carpetas tienen un guion :) así que hay que usar otro método
+boids_particles = importlib.import_module("examples.boids-particles").boids_particles
+boids_abm = importlib.import_module("examples.boids-abm.app").boids_abm
 from examples.quadtree import quadtree_demo
 
-grafica_cli.add_command(quadtree_demo)
+registrar(
+    "Unidad 6. Simulación basada en agentes y estructuras espaciales",
+    boids_particles,
+    boids_abm,
+    quadtree_demo,
+)
 
+from examples.hello_opengl import hola_opengl
 from examples.rasterizer import rasterizer
 
-grafica_cli.add_command(rasterizer)
+registrar("Unidad 7. Objetos y tuberías", hola_opengl, rasterizer)
 
-from examples.texture_viewer import texture_viewer
+from examples.gimbal_lock import gimbal_lock
+from examples.spirograph import spirograph
+from examples.transformation_composition.app import compositions
+from examples.transformations.app import transformed_bunny
 
-grafica_cli.add_command(texture_viewer)
+registrar(
+    "Unidad 8. Transformaciones",
+    transformed_bunny,
+    compositions,
+    spirograph,
+    gimbal_lock,
+)
 
-from examples.lapped_hatching import lapped_hatching
+from examples.camera_frustum import camera_frustum
+from examples.projection.app import projection_example
 
-grafica_cli.add_command(lapped_hatching)
+registrar("Unidad 9. Vistas y proyecciones", projection_example, camera_frustum)
 
 from examples.perspective_correction import perspective_correction
+from examples.sistema_tierra import sistema_tierra
+from examples.texture_viewer import texture_viewer
 
-grafica_cli.add_command(perspective_correction)
-
-from examples.pecera import pecera
-
-grafica_cli.add_command(pecera)
+registrar(
+    "Unidad 10. Mapeo de texturas",
+    texture_viewer,
+    perspective_correction,
+    sistema_tierra,
+)
 
 from examples.bosque import bosque
+from examples.pecera import pecera
 
-grafica_cli.add_command(bosque)
+registrar("Unidad 11. Profundidad y transparencia", pecera, bosque)
 
+from examples.carrusel import carrusel
+from examples.pokemon_instancing import pokemon_instancing
+from examples.scene_graphs.app import solar_system
+from examples.webcam_esqueleto import webcam_esqueleto
+
+registrar(
+    "Unidad 12. Grafos de escena",
+    solar_system,
+    pokemon_instancing,
+    carrusel,
+    webcam_esqueleto,
+)
+
+from examples.cel_bunny import cel_bunny
+from examples.disco_bunny.app import disco_bunny
+from examples.phong_basico import phong_basico
+from examples.ssao import ssao
+
+registrar(
+    "Unidad 13. Iluminación y materiales",
+    phong_basico,
+    disco_bunny,
+    cel_bunny,
+    ssao,
+)
+
+from examples.pymunk_basico.app import pymunk_basico
+from examples.pymunk_boxes.app import falling_boxes
+from examples.pymunk_pinball.app import pymunk_pinball
+
+registrar(
+    "Unidad 14. Física de cuerpos rígidos",
+    pymunk_basico,
+    falling_boxes,
+    pymunk_pinball,
+)
+
+from examples.cloth.app_pymunk import cloth_pymunk
+from examples.cloth.app_verlet import cloth_verlet
+from examples.cubo_resortes import cubo_resortes
+from examples.difusion_calor import difusion_calor
+from examples.masa_resorte import masa_resorte
+
+registrar(
+    "Unidad 15. Deformación basada en física",
+    masa_resorte,
+    cloth_verlet,
+    cloth_pymunk,
+    cubo_resortes,
+    difusion_calor,
+)
+
+from examples.lapped_hatching import lapped_hatching
 from examples.lsystem import lsystem
+from examples.operaciones_malla import operaciones_malla
+from examples.simplificacion_qem import simplificacion_qem
+from examples.terrain import terrain_generation
 
-grafica_cli.add_command(lsystem)
+registrar(
+    "Unidad 16. Mallas geométricas",
+    operaciones_malla,
+    simplificacion_qem,
+    terrain_generation,
+    lsystem,
+    lapped_hatching,
+)
+
+from examples.camera_path import camera_path
+from examples.csg_raymarching import csg_raymarching
+from examples.cubo_gelatina import cubo_gelatina
+from examples.curvas_parametricas import curvas_parametricas
+from examples.metaballs import metaballs
+from examples.superficie_bezier import superficie_bezier
+
+registrar(
+    "Unidad 17. Sólidos, curvas y superficies paramétricas",
+    curvas_parametricas,
+    camera_path,
+    superficie_bezier,
+    csg_raymarching,
+    metaballs,
+    cubo_gelatina,
+)
+
+# TODO: hay que actualizar el código de dino_runner
+from examples.collision_detection import dino_runner
+from examples.katamari import katamari
+from examples.ray_triangle import ray_triangle_example
+
+registrar("Unidad 18. Colisiones", dino_runner, katamari, ray_triangle_example)
+
+from examples.raytracing_basico import raytracing_basico
+from examples.raytracing_cpu.app import raytracing_cpu
+
+registrar("Unidad 19. Trazado de rayos", raytracing_basico, raytracing_cpu)
+
+from examples.pyvista_orbital import orbital
+from examples.raycasting_volumen import raycasting_volumen
+
+registrar("Unidad 20. Rendering de volumen", orbital, raycasting_volumen)
+
+from examples.animacion_esqueletica import animacion_esqueletica
+from examples.esqueleto_lbs import esqueleto_lbs
+from examples.skinning import skinning
+
+registrar(
+    "Unidad 21. Animación y esqueletos",
+    esqueleto_lbs,
+    animacion_esqueletica,
+    skinning,
+)
+
+from examples.arcball import arcball_example
+from examples.cascaded_shadows import cascaded_shadows
+from examples.shadows import shadow_mapping
+from examples.sugecon import suggestive_contours
+
+registrar(
+    "Casos de estudio",
+    arcball_example,
+    shadow_mapping,
+    cascaded_shadows,
+    suggestive_contours,
+)
 
 if __name__ == "__main__":
     grafica_cli()

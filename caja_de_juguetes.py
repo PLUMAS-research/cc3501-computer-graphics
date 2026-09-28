@@ -92,6 +92,10 @@ from examples.shadows import shadow_mapping
 
 grafica_cli.add_command(shadow_mapping)
 
+from examples.cascaded_shadows import cascaded_shadows
+
+grafica_cli.add_command(cascaded_shadows)
+
 from examples.ssao import ssao
 
 grafica_cli.add_command(ssao)

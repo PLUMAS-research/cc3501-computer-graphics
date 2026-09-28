@@ -132,6 +132,14 @@ RECETAS = {
         Toma(sufijo="luz", teclas=["SPACE"], cuadros=40),
         Toma(sufijo="mapa", teclas=["SPACE", "SPACE"], cuadros=40),
     ],
+    # cascaded shadows: la cámara, el tinte de cascadas, la noche con los
+    # focos y la vista desde arriba
+    "cascaded_shadows": [
+        Toma(cuadros=2),
+        Toma(sufijo="cascadas", teclas=["V"], cuadros=2),
+        Toma(sufijo="noche", teclas=["N"], cuadros=90),
+        Toma(sufijo="arriba", teclas=["F", "V"], cuadros=2),
+    ],
     "perspective_correction": [
         Toma(sufijo="correcta", teclas=["D"], cuadros=2),
         Toma(sufijo="afin", teclas=["D", "SPACE"], cuadros=2),
@@ -248,12 +256,13 @@ def _handler(ventana, nombre_evento):
 
 def _disparar_teclas(ventana, teclas):
     import pyglet
-    on_key = _handler(ventana, "on_key_press")
-    if on_key is None:
-        return
     for tecla in teclas:
-        # pyglet encola dispatch_event hasta que corre el loop, asi que llamamos directo
-        on_key(getattr(pyglet.window.key, tecla), 0)
+        # Window.dispatch_event encola hasta que corre el loop; el de
+        # EventDispatcher despacha en el acto y recorre todo el stack, incluidos
+        # los handlers empujados con push_handlers (un KeyStateHandler)
+        pyglet.event.EventDispatcher.dispatch_event(
+            ventana, "on_key_press", getattr(pyglet.window.key, tecla), 0
+        )
 
 
 def _avanzar(ticks, cuadros, dt=1 / 60.0):

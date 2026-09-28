@@ -232,19 +232,24 @@ class Scenegraph(nx.DiGraph):
 
                         current_attr = instance_attrs[attr]
 
-                        if type(current_attr) == float or type(current_attr) == int:
+                        if not (type(current_attr) == float or type(current_attr) == int):
+                            current_size = current_attr.shape[0]
+
+                            if len(current_attr.shape) > 1:
+                                current_size = current_size * current_attr.shape[1]
+
+                            current_attr = current_attr.reshape(current_size, 1, order="F")
+
+                        try:
                             current_pipeline[attr] = current_attr
-                        else:
-                            current_size = instance_attrs[attr].shape[0]
-
-                            if len(instance_attrs[attr].shape) > 1:
-                                current_size = (
-                                    current_size * instance_attrs[attr].shape[1]
-                                )
-
-                            current_pipeline[attr] = instance_attrs[attr].reshape(
-                                current_size, 1, order="F"
-                            )
+                        except pyglet.graphics.shader.ShaderException:
+                            # El shader de reemplazo de pipeline_override no
+                            # tiene por qué declarar los uniforms de la
+                            # instancia: el de profundidad no usa el color.
+                            # Sin override, el error avisa de un nombre mal
+                            # escrito.
+                            if pipeline_override is None:
+                                raise
 
                 # Configurar texturas: primero la textura por defecto (mantener compatibilidad)
                 initial_texture_unit = 0

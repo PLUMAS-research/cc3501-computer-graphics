@@ -9,7 +9,7 @@ import pyglet.gl as GL
 import grafica.transformations as tr
 from grafica.framebuffers import create_depth_framebuffer
 from grafica.scenegraph import Scenegraph
-from grafica.scenegraph_premade import bounding_box_node, rectangle_2d
+from grafica.scenegraph_premade import bounding_box_node, rectangle_2d, unit_axes_node
 from grafica.ui import ui_overlay
 
 # Resolución del shadow map. Independiente del tamaño de la ventana: el
@@ -144,17 +144,32 @@ def shadow_mapping(width, height):
     # senoidal en x y z para que la sombra se mueva.
     initial_light_position = np.array([0.01, 0.55, -0.02])
 
-    # Estos tres valores se recalculan en update_light_matrices() al cambiar
-    # la posición de la luz o el FOV. Se inicializan acá con valores válidos.
+    # La luz es una cámara más, con su propia vista y su propia proyección.
+    # Mira hacia abajo, así que up = (0, 1, 0) sería paralelo a la dirección
+    # de visión y lookAt no podría construir la base. Con (0, 0, -1), el
+    # borde superior del shadow map queda hacia el fondo de la caja.
+    light_target = np.array([0.0, 0.0, 0.0])
+    light_up = np.array([0.0, 0.0, -1.0])
+    # El volumen de la luz no depende del de la cámara. El piso de la caja
+    # está a 1.55 de la luz, así que el plano lejano queda justo detrás.
+    light_near_plane = 0.1
+    light_far_plane = 2.0
+
+    # De NDC ([-1, 1]^3) a coordenadas de textura y profundidad ([0, 1]^3).
+    # Como es una matriz, se puede aplicar antes de dividir por w: su
+    # traslación queda multiplicada por w y la división la deja en 0.5.
+    ndc_to_texture = tr.translate(0.5, 0.5, 0.5) @ tr.uniformScale(0.5)
+
+    # Estos valores se recalculan en update_light_matrices() al cambiar la
+    # posición de la luz o el FOV. Se inicializan acá con valores válidos.
+    # El aspecto es 1 porque el shadow map es cuadrado, sin importar la
+    # forma de la ventana.
     projection_light = tr.perspective(
-        SHADOW_DEFAULTS["light_fov_degrees"], 1.0, near_plane, far_plane
+        SHADOW_DEFAULTS["light_fov_degrees"], 1.0, light_near_plane, light_far_plane
     )
-    view_light = tr.lookAt(
-        initial_light_position,
-        np.array([0.0, 0.0, 0.0]),
-        np.array([0.0, 0.0, -1.0]),
-    )
+    view_light = tr.lookAt(initial_light_position, light_target, light_up)
     light_transform = projection_light @ view_light
+    shadow_transform = ndc_to_texture @ light_transform
 
     graph.register_view_transform(view_light, name="light_view")
     graph.register_view_transform(view_camera, name="camera_view")
@@ -188,15 +203,21 @@ def shadow_mapping(width, height):
     graph.add_mesh_instance(
         "screen", rectangle_2d(texture=depth_buffer), "quad_view", parent="root"
     )
+    # quad_view los usa para deshacer la proyección de la luz.
+    graph.set_global_attributes(
+        light_near_plane=light_near_plane, light_far_plane=light_far_plane
+    )
 
     # -------------------------------------------------------------------------
-    # Overlay 3D: wireframe del frustum de la luz
+    # Overlay 3D: frustum y ejes de la luz
     # -------------------------------------------------------------------------
-    # El frustum de la luz es el cubo NDC ([-1, 1]^3) llevado a world space
-    # por inverse(projection_light @ view_light). Definimos un cubo wireframe
-    # en NDC y, en cada frame, asignamos esa matriz inversa como su transform.
-    # Va en un grafo paralelo al principal porque usa otra pipeline y solo se
-    # dibuja en algunos modos de vista.
+    # Las dos piezas se dibujan con la inversa de una matriz de la luz. El
+    # frustum es el cubo NDC ([-1, 1]^3) llevado a world space por
+    # inverse(projection_light @ view_light). Los ejes son los de la base
+    # canónica llevados por inverse(view_light), que es la pose de la luz: sus
+    # columnas son los ejes de la luz en coordenadas de mundo y su última
+    # columna, la posición. Va en un grafo paralelo al principal porque usa
+    # otra pipeline y solo se dibuja en algunos modos de vista.
     overlay_graph = Scenegraph("root")
     overlay_graph.load_and_register_pipeline(
         "line_pipeline",
@@ -210,6 +231,9 @@ def shadow_mapping(width, height):
         ),
         "line_pipeline",
         parent="root",
+    )
+    overlay_graph.add_mesh_instance(
+        "light_axes_instance", unit_axes_node(), "line_pipeline", parent="root"
     )
     overlay_graph.register_view_transform(view_camera, name="default")
     overlay_graph.set_global_attributes(projection=projection_camera)
@@ -250,17 +274,14 @@ def shadow_mapping(width, height):
     )
 
     def update_light_matrices():
-        nonlocal projection_light, view_light, light_transform
+        nonlocal projection_light, view_light, light_transform, shadow_transform
         projection_light = tr.perspective(
-            state["light_fov_degrees"], 1.0, near_plane, far_plane
+            state["light_fov_degrees"], 1.0, light_near_plane, light_far_plane
         )
         bulb_position = graph.get_global_position("bulb_mesh")
-        view_light = tr.lookAt(
-            bulb_position,
-            np.array([0.0, 0.0, 0.0]),
-            np.array([0.0, 0.0, -1.0]),
-        )
+        view_light = tr.lookAt(bulb_position, light_target, light_up)
         light_transform = projection_light @ view_light
+        shadow_transform = ndc_to_texture @ light_transform
         graph.views["light_view"] = view_light
 
     def apply_lighting():
@@ -279,7 +300,7 @@ def shadow_mapping(width, height):
         )
         label_view.text = (
             f"vista:           {VIEW_MODES[view_mode_index]}"
-            f"{'  + frustum' if show_frustum else ''}"
+            f"{'  + frustum y ejes de la luz' if show_frustum else ''}"
         )
         print(
             f"[shadow]"
@@ -394,7 +415,7 @@ def shadow_mapping(width, height):
             graph.set_global_attributes(
                 projection=main_projection,
                 light_position=graph.get_global_position("bulb_mesh"),
-                light_transform=light_transform,
+                shadow_transform=shadow_transform,
             )
             # Solo los pipelines 3D: quad_view es screen-space y se rendea
             # solo en el modo "shadow map".
@@ -409,6 +430,9 @@ def shadow_mapping(width, height):
                 overlay_graph.nodes["light_frustum_instance"]["transform"] = (
                     np.linalg.inv(light_transform).astype(np.float32)
                 )
+                overlay_graph.nodes["light_axes_instance"]["transform"] = (
+                    np.linalg.inv(view_light) @ tr.uniformScale(0.25)
+                ).astype(np.float32)
                 GL.glLineWidth(2.0)
                 overlay_graph.render()
                 GL.glLineWidth(1.0)

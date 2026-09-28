@@ -125,7 +125,13 @@ RECETAS = {
         Toma(cuadros=30),
         Toma(sufijo="samus", args=["--modelo", "samus"], cuadros=30),
     ],
-    "shadow_mapping": [Toma(cuadros=40)],
+    # shadow mapping: la salida y los tres modos que muestran los espacios de la luz
+    "shadow_mapping": [
+        Toma(cuadros=40),
+        Toma(sufijo="frustum", teclas=["F"], cuadros=40),
+        Toma(sufijo="luz", teclas=["SPACE"], cuadros=40),
+        Toma(sufijo="mapa", teclas=["SPACE", "SPACE"], cuadros=40),
+    ],
     "perspective_correction": [
         Toma(sufijo="correcta", teclas=["D"], cuadros=2),
         Toma(sufijo="afin", teclas=["D", "SPACE"], cuadros=2),

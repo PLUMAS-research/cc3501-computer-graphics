@@ -4,7 +4,7 @@
 in vec4 fragment_color;
 in vec3 fragment_normal;
 in vec3 fragment_world_position;
-in vec4 position_in_light_space;
+in vec4 position_in_shadow_map;
 
 out vec4 out_color;
 
@@ -22,9 +22,12 @@ vec3 calc_diffuse(vec3 normal_world, vec3 light_dir, vec3 light_color, vec3 mate
 }
 
 // 1.0 si el fragmento está en sombra, 0.0 si está iluminado.
-float calc_shadow(vec4 fragment_position_light_space) {
-    vec3 projected_coords = fragment_position_light_space.xyz / fragment_position_light_space.w;
-    projected_coords = projected_coords * 0.5 + 0.5;
+float calc_shadow(vec4 shadow_map_position) {
+    // La división por w deja xy como coordenadas de textura y z como la
+    // profundidad del punto vista desde la luz, las tres en [0, 1]. Se hace
+    // aquí y no en el vertex program: x/w no varía de forma lineal sobre el
+    // triángulo, así que interpolar el cociente daría otro punto.
+    vec3 projected_coords = shadow_map_position.xyz / shadow_map_position.w;
 
     if (projected_coords.x < 0.0 || projected_coords.x > 1.0 ||
         projected_coords.y < 0.0 || projected_coords.y > 1.0 ||
@@ -77,7 +80,7 @@ void main() {
 
     vec3 ambient = material_ambient * vec3(fragment_color.rgb);
 
-    float shadow = calc_shadow(position_in_light_space);
+    float shadow = calc_shadow(position_in_shadow_map);
     float in_light = 1.0 - shadow;
 
     out_color = vec4(ambient + in_light * diffuse, fragment_color.a);

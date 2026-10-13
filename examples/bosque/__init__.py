@@ -4,7 +4,7 @@ import click
 import numpy as np
 import pyglet
 import pyglet.gl as GL
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw
 
 import grafica.transformations as tr
 from grafica.arcball import Arcball
@@ -19,28 +19,30 @@ COLOR_PASTO = np.array([0.42, 0.62, 0.32], dtype=np.float32)
 MODOS_BLEND = ["NINGUNO", "STANDARD", "PREMULTIPLICADO"]
 
 
-def crear_textura_arbol(size=128, blur_radius=5):
-    """Genera una textura de arbol con un borde difuso ancho.
+def crear_textura_arbol(size=128, supersampling=4):
+    """Genera una textura de arbol con alfa directo (sin premultiplicar).
 
-    El blur gaussiano se aplica sobre RGBA, lo que mezcla los pixeles opacos
-    (RGB del color del arbol) con los transparentes (RGB cero). El resultado
-    son pixeles intermedios con RGB proporcional al alpha. Esa es justo la
-    condicion clasica que produce bordes oscuros con blending estandar y que
-    la premultiplicacion corrige.
+    Los texeles del arbol guardan su color completo y los del fondo valen
+    (0, 0, 0, 0). El contorno se suaviza con supermuestreo, asi que solo una
+    franja de un texel tiene alfa intermedio. Al filtrar con LINEAR, la GPU
+    promedia el color del contorno con el negro del fondo: con blending
+    estandar eso deja un anillo oscuro alrededor de la copa, que es el problema
+    que la premultiplicacion corrige.
     """
-    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    grande = size * supersampling
+    img = Image.new("RGBA", (grande, grande), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
-    cx = size // 2
-    tronco_w = max(2, size // 12)
-    tronco_h = int(size * 0.40)
+    cx = grande // 2
+    tronco_w = max(2, size // 12) * supersampling
+    tronco_h = int(size * 0.40) * supersampling
     draw.rectangle(
-        [(cx - tronco_w, size - tronco_h), (cx + tronco_w, size - 1)],
+        [(cx - tronco_w, grande - tronco_h), (cx + tronco_w, grande - 1)],
         fill=(110, 70, 40, 255),
     )
 
-    copa_radio = size * 0.32
-    copa_y = size * 0.38
+    copa_radio = grande * 0.32
+    copa_y = grande * 0.38
     draw.ellipse(
         [
             (cx - copa_radio, copa_y - copa_radio),
@@ -49,7 +51,25 @@ def crear_textura_arbol(size=128, blur_radius=5):
         fill=(80, 200, 90, 255),
     )
 
-    return img.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+    # Cada texel promedia sus supersampling x supersampling muestras. El alfa
+    # es la fraccion cubierta y el color es el promedio de las muestras
+    # cubiertas, sin oscurecerlo por el alfa.
+    muestras = np.asarray(img, dtype=np.float32) / 255.0
+    muestras = muestras.reshape(size, supersampling, size, supersampling, 4)
+    alfa = muestras[..., 3].mean(axis=(1, 3))
+    rgb = (muestras[..., :3] * muestras[..., 3:]).mean(axis=(1, 3))
+    rgb = np.where(alfa[..., None] > 0, rgb / np.maximum(alfa[..., None], 1e-6), 0.0)
+
+    texeles = np.dstack([rgb, alfa])
+    return Image.fromarray(np.round(texeles * 255).astype(np.uint8), "RGBA")
+
+
+def premultiplicar(img):
+    """Multiplica el RGB de cada texel por su alfa antes de subirlo a la GPU.
+    Asi el filtrado promedia color y opacidad juntos."""
+    texeles = np.asarray(img, dtype=np.float32) / 255.0
+    texeles[..., :3] *= texeles[..., 3:]
+    return Image.fromarray(np.round(texeles * 255).astype(np.uint8), "RGBA")
 
 
 def construir_arboles(seed, n_arboles, area):
@@ -156,7 +176,13 @@ def bosque(n_arboles, width, height):
         Path(__file__).parent / "billboard_fragment.glsl",
     )
 
-    textura_arbol = texture_2D_setup(crear_textura_arbol(128))
+    # La misma imagen en las dos convenciones: NINGUNO y STANDARD usan la de
+    # alfa directo, PREMULTIPLICADO la que ya viene multiplicada por alfa.
+    imagen_arbol = crear_textura_arbol(128)
+    texturas_arbol = {
+        "directa": texture_2D_setup(imagen_arbol),
+        "premultiplicada": texture_2D_setup(premultiplicar(imagen_arbol)),
+    }
 
     posiciones_arboles, alturas_arboles = construir_arboles(
         seed=42, n_arboles=n_arboles, area=3.0
@@ -201,9 +227,10 @@ def bosque(n_arboles, width, height):
 
     def actualizar_filtro():
         modo = GL.GL_LINEAR if estado["filtro_lineal"] else GL.GL_NEAREST
-        GL.glBindTexture(GL.GL_TEXTURE_2D, textura_arbol)
-        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, modo)
-        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, modo)
+        for textura in texturas_arbol.values():
+            GL.glBindTexture(GL.GL_TEXTURE_2D, textura)
+            GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, modo)
+            GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, modo)
 
     @window.event
     def on_mouse_press(x, y, button, modifiers):
@@ -313,10 +340,12 @@ def bosque(n_arboles, width, height):
         pipeline_billboard["projection"] = projection.reshape(16, 1, order="F")
         pipeline_billboard["camera_position"] = camera_position
         pipeline_billboard["diffuse"] = 0
-        pipeline_billboard["premultiply"] = bool(modo_blend == "PREMULTIPLICADO")
 
         GL.glActiveTexture(GL.GL_TEXTURE0)
-        GL.glBindTexture(GL.GL_TEXTURE_2D, textura_arbol)
+        if modo_blend == "PREMULTIPLICADO":
+            GL.glBindTexture(GL.GL_TEXTURE_2D, texturas_arbol["premultiplicada"])
+        else:
+            GL.glBindTexture(GL.GL_TEXTURE_2D, texturas_arbol["directa"])
 
         if estado["ordenar"]:
             orden = ordenar_arboles(posiciones_arboles, view_matrix)

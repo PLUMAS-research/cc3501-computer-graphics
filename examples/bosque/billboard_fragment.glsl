@@ -4,7 +4,6 @@ in vec2 frag_texcoord;
 
 uniform sampler2D diffuse;
 uniform float alpha_test_threshold;
-uniform bool premultiply;
 
 out vec4 out_color;
 
@@ -17,12 +16,8 @@ void main()
         discard;
     }
 
-    // Cuando el modo de blending es premultiplicado, multiplicamos el RGB por
-    // alpha en el shader. La funcion de blending opera con (ONE, 1-src_alpha)
-    // y obtiene el resultado correcto en los bordes.
-    if (premultiply) {
-        out_color = vec4(sample_color.rgb * sample_color.a, sample_color.a);
-    } else {
-        out_color = sample_color;
-    }
+    // El shader no multiplica por alpha en ningun modo. En modo premultiplicado
+    // la textura ya viene multiplicada desde la CPU, y multiplicar aqui de
+    // nuevo oscureceria el borde igual que el blending estandar.
+    out_color = sample_color;
 }

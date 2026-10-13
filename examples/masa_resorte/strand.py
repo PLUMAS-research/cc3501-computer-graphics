@@ -104,6 +104,11 @@ class HebraMasaResorte:
         indices_fijos = np.array((0,) + tuple(fijos), dtype=int)
         posiciones_fijas = self.positions[indices_fijos].copy()
         sub_dt = dt / substeps
+        if metodo == "verlet":
+            # Verlet guarda la velocidad en la posicion anterior. La reconstruimos
+            # desde `velocities` para no perder un empujon (que cambia solo las
+            # velocidades) ni un cambio de substeps entre cuadros.
+            self.previous_positions = self.positions - self.velocities * sub_dt
 
         for _ in range(substeps):
             fuerzas = _fuerzas(

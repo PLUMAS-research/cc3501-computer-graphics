@@ -285,6 +285,11 @@ class Arcball:
         gesto opuesto lo divide.
         """
         factor = np.exp(vertical_delta / size_factor)
+        # Como en los otros gestos, el desplazamiento se mide desde `down`, así
+        # que el factor se aplica a la pose guardada ahí. Aplicado a la pose
+        # del evento anterior, cada evento volvería a multiplicar la distancia
+        # por el desplazamiento total y el zoom se acumularía.
+        self._pose = np.copy(self._drag_pose)
         self._scale_distance(factor)
 
     def scroll(self, clicks):

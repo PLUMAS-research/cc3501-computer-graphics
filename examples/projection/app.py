@@ -77,8 +77,10 @@ def projection_example(width, height):
         np.array([0, 0, 0.25]),
         np.array([0.0, 0.0, 1.0]),
     )
+    # la cámara mira a lo largo de la diagonal (1, 1, -1): así los tres ejes
+    # forman el mismo ángulo con la dirección de visión y se acortan igual
     isometric_view = tr.lookAt(
-        np.array([-0.7, -0.7, 0.7]),
+        np.array([-0.7, -0.7, 0.95]),
         np.array([0, 0, 0.25]),
         np.array([0.0, 0.0, 1.0]),
     )

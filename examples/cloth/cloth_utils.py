@@ -92,7 +92,8 @@ def Cloth(
     vertices = []
     for j in range(vertiz):
         for i in range(horiz):
-            vertices.append(Point(Vec2(x + i * t, y + j * t)))
+            # la fila 0 es la de arriba: la tela cuelga hacia abajo desde `position`
+            vertices.append(Point(Vec2(x + i * t, y - j * t)))
 
     joints = []
 

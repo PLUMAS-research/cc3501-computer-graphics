@@ -113,25 +113,20 @@ def cloth_pymunk(width, height, vertical_resolution, horizontal_resolution, spac
             win.space.add(b, s)
             win.bodies[i] = b
 
-        # Crear resortes muy suaves
+        # Un resorte por cada par de la tela: horizontales y verticales
+        # (estructurales) y diagonales (de corte). Son los mismos pares que se dibujan.
         for joint in win.cloth.joints:
             a = win.bodies[joint[0]]
             b = win.bodies[joint[1]]
             rest_length = a.position.get_distance(b.position)
-            
-            # Solo resortes principales (no diagonales para simplicidad)
-            row_diff = abs(joint[0] // horizontal_resolution - joint[1] // horizontal_resolution)
-            col_diff = abs(joint[0] % horizontal_resolution - joint[1] % horizontal_resolution)
-            
-            if (row_diff == 1 and col_diff == 0) or (row_diff == 0 and col_diff == 1):
-                spring = pymunk.DampedSpring(
-                    a, b, (0, 0), (0, 0),
-                    rest_length=rest_length,
-                    stiffness=state.material_stiffness,
-                    damping=state.material_damping
-                )
-                win.space.add(spring)
-                win.springs.append(spring)
+            spring = pymunk.DampedSpring(
+                a, b, (0, 0), (0, 0),
+                rest_length=rest_length,
+                stiffness=state.material_stiffness,
+                damping=state.material_damping
+            )
+            win.space.add(spring)
+            win.springs.append(spring)
 
     def update_cloth_system(dt, win):
         state.time += dt

@@ -76,10 +76,11 @@ def arcball_example(filename, width, height):
     available_pipelines = [main_pipeline, depth_pipeline]
     graph.register_pipeline("pipeline", main_pipeline)
 
-    # Bounding sphere del modelo. _node_from_file lo normaliza a [-1, 1]^3,
-    # así que el radio máximo es sqrt(3). Lo usamos para ajustar el rango de
+    # Bounding sphere del modelo. _node_from_file centra la caja envolvente en
+    # el origen y la escala para que su diagonal mida 2, así que el modelo
+    # cabe en una esfera de radio 1. Lo usamos para ajustar el rango de
     # profundidad de la visualización z-buffer al modelo, no al frustum entero.
-    MODEL_RADIUS = float(np.sqrt(3.0))
+    MODEL_RADIUS = 1.0
 
     graph.add_mesh_instance("object", "object", "pipeline")
     graph.add_edge("root", "object")

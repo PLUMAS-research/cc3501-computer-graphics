@@ -145,12 +145,25 @@ registrar(
     ssao,
 )
 
+from examples.lapped_hatching import lapped_hatching
+from examples.lsystem import lsystem
+from examples.operaciones_malla import operaciones_malla
+from examples.simplificacion_qem import simplificacion_qem
+
+registrar(
+    "Unidad 14. Mallas geométricas",
+    operaciones_malla,
+    simplificacion_qem,
+    lsystem,
+    lapped_hatching,
+)
+
 from examples.pymunk_basico.app import pymunk_basico
 from examples.pymunk_boxes.app import falling_boxes
 from examples.pymunk_pinball.app import pymunk_pinball
 
 registrar(
-    "Unidad 14. Física de cuerpos rígidos",
+    "Unidad 15. Física de cuerpos rígidos",
     pymunk_basico,
     falling_boxes,
     pymunk_pinball,
@@ -163,27 +176,12 @@ from examples.difusion_calor import difusion_calor
 from examples.masa_resorte import masa_resorte
 
 registrar(
-    "Unidad 15. Deformación basada en física",
+    "Unidad 16. Deformación basada en física",
     masa_resorte,
     cloth_verlet,
     cloth_pymunk,
     cubo_resortes,
     difusion_calor,
-)
-
-from examples.lapped_hatching import lapped_hatching
-from examples.lsystem import lsystem
-from examples.operaciones_malla import operaciones_malla
-from examples.simplificacion_qem import simplificacion_qem
-from examples.terrain import terrain_generation
-
-registrar(
-    "Unidad 16. Mallas geométricas",
-    operaciones_malla,
-    simplificacion_qem,
-    terrain_generation,
-    lsystem,
-    lapped_hatching,
 )
 
 from examples.camera_path import camera_path
@@ -192,12 +190,14 @@ from examples.cubo_gelatina import cubo_gelatina
 from examples.curvas_parametricas import curvas_parametricas
 from examples.metaballs import metaballs
 from examples.superficie_bezier import superficie_bezier
+from examples.terrain import terrain_generation
 
 registrar(
     "Unidad 17. Sólidos, curvas y superficies paramétricas",
     curvas_parametricas,
     camera_path,
     superficie_bezier,
+    terrain_generation,
     csg_raymarching,
     metaballs,
     cubo_gelatina,

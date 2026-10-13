@@ -164,6 +164,11 @@ RECETAS = {
         Toma(sufijo="promedio", teclas=["M"], cuadros=2),
         Toma(sufijo="compositing", teclas=["M", "M"], cuadros=2),
     ],
+    # la viga se asienta en unos 5 s; con 8 filas el FEM necesita mas substeps
+    "fem_viga": [
+        Toma(cuadros=300),
+        Toma(sufijo="8filas", teclas=["F"] + ["X"] * 7, cuadros=300),
+    ],
     "skinning": [
         Toma(sufijo="lbs", teclas=["PERIOD"] * 6, cuadros=2),
         Toma(sufijo="dqs", teclas=["M"] + ["PERIOD"] * 6, cuadros=2),

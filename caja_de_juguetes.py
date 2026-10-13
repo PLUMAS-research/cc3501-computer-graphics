@@ -173,6 +173,7 @@ from examples.cloth.app_pymunk import cloth_pymunk
 from examples.cloth.app_verlet import cloth_verlet
 from examples.cubo_resortes import cubo_resortes
 from examples.difusion_calor import difusion_calor
+from examples.fem_viga import fem_viga
 from examples.masa_resorte import masa_resorte
 
 registrar(
@@ -182,6 +183,7 @@ registrar(
     cloth_pymunk,
     cubo_resortes,
     difusion_calor,
+    fem_viga,
 )
 
 from examples.camera_path import camera_path

@@ -176,8 +176,8 @@ def ssao(width, height, seed):
     # caja de Cornell ocupa +-0.57 y su piso queda en y = -0.571. Los dos
     # objetos se apoyan ahí: la mitad de su alto por sobre el piso.
     piso = -0.571
-    escala_pokemon, alto_pokemon = 0.42, 0.64
-    escala_esfera, radio_esfera = 0.30, 0.577
+    escala_pokemon, alto_pokemon = 0.18, 0.64
+    escala_esfera, radio_esfera = 0.09, 0.577
 
     graph.add_mesh_instance("caja", "cornell_box", "lighting_shader", parent="root")
     graph.add_mesh_instance(
@@ -185,7 +185,7 @@ def ssao(width, height, seed):
         "squirtle",
         "lighting_shader",
         transform=(
-            tr.translate(0.16, piso + escala_pokemon * alto_pokemon, 0.28)
+            tr.translate(0.23, piso + escala_pokemon * alto_pokemon, 0.40)
             @ tr.uniformScale(escala_pokemon)
         ),
         parent="root",
@@ -195,7 +195,7 @@ def ssao(width, height, seed):
         "sphere",
         "lighting_shader",
         transform=(
-            tr.translate(-0.25, piso + escala_esfera * radio_esfera, 0.26)
+            tr.translate(-0.32, piso + escala_esfera * radio_esfera, 0.34)
             @ tr.uniformScale(escala_esfera)
         ),
         parent="root",

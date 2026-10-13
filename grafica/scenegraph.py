@@ -394,10 +394,15 @@ class Scenegraph(nx.DiGraph):
             if dst not in self.global_transforms:
                 dst_transform = self.nodes[dst].get("transform", tr.identity())
 
-                # Considerar transformaciones de instancia si existen
+                # Considerar transformaciones de instancia si existen. Los hijos
+                # de una malla cargada desde archivo comparten el diccionario de
+                # atributos de su instancia (para que un cambio de color llegue
+                # a todos), así que la transformación se aplica solo en el nodo
+                # base; en los hijos se aplicaría por segunda vez.
                 if (
                     "instance_attributes" in self.nodes[dst]
                     and "transform" in self.nodes[dst]["instance_attributes"]
+                    and self.nodes[dst].get("_child_index") is None
                 ):
                     dst_transform = (
                         dst_transform

@@ -120,7 +120,7 @@ def shadow_mapping(width, height):
         "pokemon",
         "squirtle",
         "basic_shader",
-        transform=tr.uniformScale(0.5),
+        transform=tr.uniformScale(0.25),
         parent="main",
     )
 
@@ -181,7 +181,7 @@ def shadow_mapping(width, height):
         "bulb_mesh",
         "sphere",
         "bulb_pipeline",
-        transform=tr.uniformScale(0.1),
+        transform=tr.uniformScale(0.01),
         bulb_color=np.array([1.0, 0.3, 0.0]),
         parent="root",
     )

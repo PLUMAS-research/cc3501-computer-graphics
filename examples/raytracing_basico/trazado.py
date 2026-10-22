@@ -195,9 +195,10 @@ def color_rayo(
         # componente difusa (Lambert)
         coseno_difuso = max(np.dot(normal, hacia_luz), 0.0)
         color = color + difuso * coseno_difuso * albedo * luz["color"]
-        # componente especular (Blinn-Phong)
-        media = normalizar(hacia_luz + hacia_camara)
-        coseno_especular = max(np.dot(normal, media), 0.0)
+        # componente especular (Phong): la luz reflejada respecto de la normal,
+        # comparada con la direccion hacia la camara
+        luz_reflejada = 2.0 * np.dot(normal, hacia_luz) * normal - hacia_luz
+        coseno_especular = max(np.dot(luz_reflejada, hacia_camara), 0.0)
         color = color + especular * (coseno_especular ** brillo) * luz["color"]
 
     # reflexion: lanzamos un rayo espejado y mezclamos segun la reflectividad

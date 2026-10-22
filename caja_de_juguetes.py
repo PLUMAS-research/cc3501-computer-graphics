@@ -212,10 +212,11 @@ from examples.ray_triangle import ray_triangle_example
 
 registrar("Unidad 18. Colisiones", dino_runner, katamari, ray_triangle_example)
 
+from examples.raytracing_2d import raytracing_2d
 from examples.raytracing_basico import raytracing_basico
 from examples.raytracing_cpu.app import raytracing_cpu
 
-registrar("Unidad 19. Trazado de rayos", raytracing_basico, raytracing_cpu)
+registrar("Unidad 19. Trazado de rayos", raytracing_2d, raytracing_basico, raytracing_cpu)
 
 from examples.pyvista_orbital import orbital
 from examples.raycasting_volumen import raycasting_volumen

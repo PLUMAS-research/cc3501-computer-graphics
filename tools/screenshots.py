@@ -66,6 +66,11 @@ RECETAS = {
         Toma(sufijo="rt", teclas=["T"], cuadros=600),  # deja completar el render progresivo
     ],
     "raytracing_basico": [Toma(cuadros=600)],  # render progresivo por CPU
+    "raytracing_2d": [
+        Toma(cuadros=2),
+        # 32 pixeles, 3 rebotes y solo el pixel 13, que rebota entre la esfera roja y la verde
+        Toma(sufijo="un-pixel", teclas=["R", "A"] + ["PERIOD"] * 3 + ["DOWN"] * 8, cuadros=2),
+    ],
     "esqueleto_lbs": [
         Toma(sufijo="reposo", cuadros=2),
         Toma(sufijo="doblado", teclas=["Z"] * 8 + ["X"] * 6, cuadros=2),

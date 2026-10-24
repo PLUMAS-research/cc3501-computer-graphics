@@ -78,10 +78,14 @@ def _construir_vertex_list(pipeline, positions, faces):
 @click.option("--width", type=int, default=960)
 @click.option("--height", type=int, default=720)
 def simplificacion_qem(filename, width, height):
-    window = pyglet.window.Window(width, height, caption="simplificacion QEM")
-
     positions, faces = _cargar_normalizada(filename)
-    malla = HalfEdgeMesh.from_faces(positions, faces)
+    try:
+        malla = HalfEdgeMesh.from_faces(positions, faces)
+    except ValueError as error:
+        # la estructura half-edge, y con ella QEM, supone una variedad orientada
+        raise click.ClickException(f"{filename} no es una variedad orientada: {error}") from error
+
+    window = pyglet.window.Window(width, height, caption="simplificacion QEM")
     caras_originales = malla.n_faces()
     objetivos = [int(caras_originales * fraccion) for fraccion in FRACCIONES]
     print(f"[qem] {filename}: {caras_originales} caras. preparando niveles {objetivos} ...")

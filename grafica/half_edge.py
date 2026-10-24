@@ -64,6 +64,12 @@ class HalfEdgeMesh:
         (F, 3) de indices. El emparejamiento de gemelas usa un diccionario que
         mapea cada arista dirigida (origen, destino) a su semi-arista; la
         gemela es la semi-arista de la arista opuesta (destino, origen).
+
+        Lanza ValueError si la malla no es una variedad orientada: una arista
+        dirigida que aparece dos veces (arista en mas de dos caras, o caras
+        vecinas con orientaciones opuestas) o un vertice que une mas de un
+        abanico de caras. Con esas mallas la estructura no es valida y las
+        operaciones la corromperian.
         """
         mesh = cls()
         positions = np.asarray(positions, dtype=np.float64)
@@ -88,12 +94,30 @@ class HalfEdgeMesh:
             mesh.f_he.append(h0)
             mesh.f_alive.append(True)
             for halfedge, (origin, dest) in zip((h0, h1, h2), ((a, b), (b, c), (c, a))):
+                if (origin, dest) in edge_to_halfedge:
+                    raise ValueError(f"la arista ({origin}, {dest}) aparece dos veces con el mismo sentido: "
+                                     "esta en mas de dos caras o sus caras tienen orientaciones opuestas")
                 edge_to_halfedge[(origin, dest)] = halfedge
                 mesh.v_he[origin] = halfedge
 
         for (origin, dest), halfedge in edge_to_halfedge.items():
             twin = edge_to_halfedge.get((dest, origin), BORDE)
             mesh.he_twin[halfedge] = twin
+
+        # en un vertice de borde el giro de outgoing_ring se detiene en el
+        # borde, asi que tiene que partir de la saliente sin anterior (la que
+        # sigue a una semi-arista de borde) para recorrer el abanico entero
+        salientes = [0] * len(positions)
+        for h in range(len(mesh.he_to)):
+            origin = mesh.tail(h)
+            salientes[origin] += 1
+            if mesh.he_twin[mesh.he_next[mesh.he_next[h]]] == BORDE:
+                mesh.v_he[origin] = h
+        # si el giro no pasa por todas las salientes, el vertice une dos
+        # abanicos de caras (como la punta comun de dos conos opuestos)
+        for v, cantidad in enumerate(salientes):
+            if cantidad and len(mesh.outgoing_ring(v)[0]) != cantidad:
+                raise ValueError(f"el vertice {v} une mas de un abanico de caras")
 
         return mesh
 

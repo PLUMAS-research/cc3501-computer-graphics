@@ -207,7 +207,7 @@ def campo_de_direcciones(vertices, caras, direccion_principal="minima", base=Non
             reporte(f"  simplificando la malla a {objetivo} caras (QEM)...")
         try:
             gruesa, = simplificar_a_niveles(HalfEdgeMesh.from_faces(vertices_base, caras_base), [objetivo])
-        except (KeyError, IndexError, ValueError) as error:
+        except ValueError as error:
             if reporte:
                 reporte(f"  QEM falló ({error!r})")
     if gruesa is None:

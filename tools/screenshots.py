@@ -49,7 +49,20 @@ class Toma:
 # Los que requieren un argumento obligatorio (mesh/imagen) deben tener receta.
 RECETAS = {
     "arcball_example": [Toma(args=["assets/bunny.obj"], cuadros=2)],
-    "lapped_hatching": [Toma(args=["assets/bunny.obj"], cuadros=2)],
+    # achurado en tiempo real: el resultado, el TAM (figura 2 del paper), los
+    # parches de la lapped texture con un tono al azar cada uno, el otro estilo
+    # de TAM, el umbral de tono y Samus con su textura en el papel, en los
+    # trazos y sin ella
+    "lapped_hatching": [
+        Toma(args=["assets/bunny.obj"], cuadros=2),
+        Toma(sufijo="tam", args=["assets/bunny.obj"], teclas=["T"], cuadros=2),
+        Toma(sufijo="parches", args=["assets/bunny.obj"], teclas=["P"], cuadros=2),
+        Toma(sufijo="figura2", args=["assets/bunny.obj"], teclas=["E"], cuadros=2),
+        Toma(sufijo="umbral", args=["assets/bunny.obj"], teclas=["U"], cuadros=2),
+        Toma(sufijo="samus", args=["assets/samus/posed.obj"], cuadros=2),
+        Toma(sufijo="samus-trazos", args=["assets/samus/posed.obj"], teclas=["O"], cuadros=2),
+        Toma(sufijo="samus-sin-textura", args=["assets/samus/posed.obj"], teclas=["O", "O"], cuadros=2),
+    ],
     "chroma_key": [Toma(args=["assets/boo.png"], cuadros=2)],
     "image_pixel": [Toma(args=["assets/santiago.png"], cuadros=2)],
     "image_texture": [Toma(args=["assets/bricks.jpg"], cuadros=2)],

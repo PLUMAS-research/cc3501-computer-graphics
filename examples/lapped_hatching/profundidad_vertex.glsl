@@ -1,0 +1,12 @@
+#version 330
+
+in vec3 position;
+
+uniform mat4 view;
+uniform mat4 projection;
+
+invariant gl_Position;
+
+void main() {
+    gl_Position = projection * view * vec4(position, 1.0);
+}

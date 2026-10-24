@@ -6,3 +6,6 @@ imgui.ini
 screenshots/
 CLAUDE.md
 .claude/
+
+# datos generados por los ejemplos (por ejemplo, los TAM de lapped_hatching)
+cache/

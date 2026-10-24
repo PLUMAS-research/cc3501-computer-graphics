@@ -84,6 +84,12 @@ def dino_runner(width, height):
     imagen_dino = pyglet.image.load(
         str(Path(__file__).parent.parent.parent / "assets" / "dinosaur.png")
     )
+    # el PNG viene en escala de grises con alfa (LA), y pyglet dibuja ese
+    # formato con el fondo amarillo; en RGBA la transparencia se respeta.
+    imagen_dino = pyglet.image.ImageData(
+        imagen_dino.width, imagen_dino.height, "RGBA",
+        imagen_dino.get_data("RGBA", imagen_dino.width * 4),
+    )
     sprite_dino = pyglet.sprite.Sprite(imagen_dino)
     sprite_dino.scale = 2 * DINO_SEMIALTO / imagen_dino.height
 

@@ -1,243 +1,281 @@
 """
-Cálculo de curvaturas en mallas triangulares.
-Implementación simplificada usando método de cotangente (Meyer et al. 2003)
+Curvaturas de una malla de triángulos y sus derivadas.
+
+Sigue a Rusinkiewicz (2004), "Estimating Curvatures and Their Derivatives on
+Triangle Meshes", que es el método de la implementación de referencia de los
+suggestive contours (rtsc, sobre la biblioteca trimesh2). La idea es la misma
+dos veces:
+
+- La segunda forma fundamental II (el tensor de curvatura) mide cuánto cambia
+  la normal al moverse sobre la superficie. En cada cara se ajusta, por mínimos
+  cuadrados, el II que mejor explica la diferencia de las normales entre los
+  extremos de cada arista.
+- El tensor C de derivadas de la curvatura mide cuánto cambia II. En cada cara
+  se ajusta el C que mejor explica la diferencia de II entre los extremos de
+  cada arista.
+
+Cada cara reparte su tensor entre sus tres vértices, ponderado por el área de
+Voronoi de cada esquina, y cada vértice termina con sus curvaturas principales
+k1 y k2 (|k1| >= |k2|), sus direcciones principales d1 y d2 y su tensor C,
+expresado en la base (d1, d2).
 """
 import numpy as np
 import scipy.sparse as sp
 
 
-def compute_vertex_areas(mesh):
+def compute_vertex_normals(vertices, faces):
+    """Normales por vértice con los pesos de Max (1999).
+
+    Cada cara aporta su normal sin normalizar dividida por el producto de los
+    cuadrados de las dos aristas que llegan al vértice. Para una malla que
+    muestrea una esfera, estos pesos recuperan la normal exacta.
     """
-    Calcula el área de Voronoi para cada vértice.
-    """
-    vertex_areas = np.zeros(len(mesh.vertices))
-    
-    # Distribuir 1/3 del área de cada cara a cada vértice
-    face_areas_third = mesh.area_faces / 3.0
-    
-    # Acumular en cada vértice usando add.at (más rápido que loops)
-    for i in range(3):
-        np.add.at(vertex_areas, mesh.faces[:, i], face_areas_third)
-    
-    return vertex_areas
+    p0, p1, p2 = (vertices[faces[:, i]] for i in range(3))
+    a, b, c = p0 - p1, p1 - p2, p2 - p0
+    l2a, l2b, l2c = (np.einsum("ij,ij->i", e, e) for e in (a, b, c))
+    validas = (l2a > 0) & (l2b > 0) & (l2c > 0)
+    normal_cara = np.cross(a, b)
+    normales = np.zeros_like(vertices)
+    for esquina, peso in enumerate((l2a * l2c, l2b * l2a, l2c * l2b)):
+        aporte = normal_cara[validas] / peso[validas, np.newaxis]
+        for eje in range(3):
+            normales[:, eje] += np.bincount(faces[validas, esquina], aporte[:, eje], len(vertices))
+    return _normalizar(normales)
 
 
-def compute_cotangent_weights(mesh):
-    cotangent_weights = {}
-    
-    # Vectorizar por cara
-    faces = mesh.faces
-    vertices = mesh.vertices
-    
-    for face in faces:
+def compute_corner_areas(vertices, faces):
+    """Área de Voronoi de cada esquina de cada cara, recortada al triángulo, y
+    su suma por vértice.
+
+    En un triángulo agudo, cada esquina se queda con la región más cercana a
+    ella que a las otras dos, y las tres regiones se juntan en el circuncentro.
+    En uno obtuso el circuncentro cae fuera del triángulo: cada esquina aguda
+    se queda con el triángulo rectángulo que corta la mediatriz de su arista
+    hacia la esquina obtusa, y la obtusa, con el resto.
+    """
+    e = [vertices[faces[:, (i + 2) % 3]] - vertices[faces[:, (i + 1) % 3]] for i in range(3)]
+    area = 0.5 * np.linalg.norm(np.cross(e[0], e[1]), axis=1)
+    l2 = [np.einsum("ij,ij->i", arista, arista) for arista in e]
+    # pesos baricéntricos del circuncentro: uno no positivo indica un ángulo obtuso
+    bcw = [l2[i] * (l2[(i + 1) % 3] + l2[(i + 2) % 3] - l2[i]) for i in range(3)]
+    esquinas = np.zeros((len(faces), 3))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        escala = 0.5 * area / (bcw[0] + bcw[1] + bcw[2])
         for i in range(3):
-            v1 = face[i]
-            v2 = face[(i + 1) % 3]
-            v_opposite = face[(i + 2) % 3]
-            
-            edge1 = vertices[v1] - vertices[v_opposite]
-            edge2 = vertices[v2] - vertices[v_opposite]
-            
-            dot = np.dot(edge1, edge2)
-            norm_prod = np.linalg.norm(edge1) * np.linalg.norm(edge2)
-            
-            if norm_prod > 1e-10:
-                cos_angle = np.clip(dot / norm_prod, -1.0, 1.0)
-                sin_angle = np.sqrt(1 - cos_angle**2)
-                cot = cos_angle / (sin_angle + 1e-10)
-                
-                edge = tuple(sorted([v1, v2]))
-                cotangent_weights[edge] = cotangent_weights.get(edge, 0.0) + cot
-    
-    return cotangent_weights
+            esquinas[:, i] = escala * (bcw[(i + 1) % 3] + bcw[(i + 2) % 3])
+        for obtuso in range(3):
+            caso = bcw[obtuso] <= 0
+            for i in range(obtuso):
+                caso &= bcw[i] > 0
+            siguiente, anterior = (obtuso + 1) % 3, (obtuso + 2) % 3
+            esquinas[caso, siguiente] = (-0.25 * l2[anterior] * area / np.einsum("ij,ij->i", e[obtuso], e[anterior]))[caso]
+            esquinas[caso, anterior] = (-0.25 * l2[siguiente] * area / np.einsum("ij,ij->i", e[obtuso], e[siguiente]))[caso]
+            esquinas[caso, obtuso] = area[caso] - esquinas[caso, siguiente] - esquinas[caso, anterior]
+    esquinas = np.nan_to_num(esquinas)
+    areas = np.bincount(faces.ravel(), esquinas.ravel(), len(vertices))
+    return esquinas, areas
 
 
-def compute_mean_curvature(mesh):
-    vertices = mesh.vertices
-    normals = mesh.vertex_normals
-    N = len(vertices)
-
-    print(f"    Calculando áreas de vértices...")
-    vertex_areas = compute_vertex_areas(mesh)
-    
-    print(f"    Calculando pesos cotangente...")
-    cotangent_weights = compute_cotangent_weights(mesh)
-    
-    print(f"    Computando Laplaciano por vértice...")
-    H = np.zeros(N)
-    
-    # Construir vecindad de forma más eficiente usando edges
-    print(f"    Construyendo vecindad...")
-    vertex_neighbors = [[] for _ in range(N)]
-    for edge, weight in cotangent_weights.items():
-        v1, v2 = edge
-        vertex_neighbors[v1].append((v2, weight))
-        vertex_neighbors[v2].append((v1, weight))
-    
-    # Computar Laplaciano
-    for i in range(N):
-        if i % 10000 == 0 and i > 0:
-            print(f"      Procesado {i}/{N} vértices...")
-        
-        neighbors = vertex_neighbors[i]
-        if len(neighbors) == 0:
-            continue
-        
-        # Vectorizar el cálculo del laplaciano
-        neighbor_indices = [n[0] for n in neighbors]
-        weights = np.array([n[1] for n in neighbors])
-        
-        neighbor_positions = vertices[neighbor_indices]
-        diff = neighbor_positions - vertices[i]
-        
-        laplacian = np.sum(weights[:, np.newaxis] * diff, axis=0)
-        laplacian_norm = np.linalg.norm(laplacian)
-
-        if vertex_areas[i] > 1e-10:
-            # El laplaciano cotangente es el vector de curvatura media: su norma
-            # da |H| y su orientación respecto a la normal da el signo. Con la
-            # malla orientada hacia afuera, L apunta contra la normal en zonas
-            # convexas, así que H = -sign(L·n)|L|/(4A) queda positivo en lo
-            # convexo y negativo en lo cóncavo. Sin el signo, H sería siempre
-            # positivo y k1 = H + sqrt(H^2-K) nunca cruzaría por cero (no habría
-            # crestas), además de dejar unilateral el mapa de color de H.
-            sign = -np.sign(np.dot(laplacian, normals[i]))
-            H[i] = sign * laplacian_norm / (4.0 * vertex_areas[i])
-
-    return H
+def _normalizar(vectores):
+    largo = np.linalg.norm(vectores, axis=-1, keepdims=True)
+    largo[largo == 0] = 1.0
+    return vectores / largo
 
 
-def compute_gaussian_curvature(mesh):
-    vertices = mesh.vertices
-    N = len(vertices)
-    K = np.zeros(N)
-    
-    vertex_areas = compute_vertex_areas(mesh)
-    
-    print(f"    Computando defecto angular por vértice...")
-    
-    # Pre-calcular todas las caras adyacentes
-    vertex_faces_list = [[] for _ in range(N)]
-    for face_idx, face in enumerate(mesh.faces):
-        for v in face:
-            vertex_faces_list[v].append(face_idx)
-    
-    for i in range(N):
-        if i % 10000 == 0 and i > 0:
-            print(f"      Procesado {i}/{N} vértices...")
-        
-        angle_sum = 0.0
-        
-        for face_idx in vertex_faces_list[i]:
-            face = mesh.faces[face_idx]
-            local_idx = np.where(face == i)[0][0]
-            
-            v_prev = face[(local_idx - 1) % 3]
-            v_next = face[(local_idx + 1) % 3]
-            
-            edge1 = vertices[v_prev] - vertices[i]
-            edge2 = vertices[v_next] - vertices[i]
-            
-            norm1 = np.linalg.norm(edge1)
-            norm2 = np.linalg.norm(edge2)
-            
-            if norm1 > 1e-10 and norm2 > 1e-10:
-                cos_angle = np.clip(np.dot(edge1, edge2) / (norm1 * norm2), -1.0, 1.0)
-                angle = np.arccos(cos_angle)
-                angle_sum += angle
-        
-        angle_defect = 2 * np.pi - angle_sum
-        
-        if vertex_areas[i] > 1e-10:
-            K[i] = angle_defect / vertex_areas[i]
-    
-    return K
+def _rotar_base(u, v, normal):
+    """Gira la base tangente (u, v) para que quede perpendicular a `normal`.
 
-
-def compute_principal_curvatures(H, K):
+    El giro es el mínimo que lleva la normal de la base, u x v, a `normal`: la
+    componente de cada vector fuera del plano de las dos normales no cambia.
     """
-    Calcula curvaturas principales k1 y k2 desde H y K.
-    k1 = H + sqrt(H² - K)
-    k2 = H - sqrt(H² - K)
-    """
-    discriminant = H**2 - K
-    # Evitar valores negativos por ruido numérico
-    discriminant = np.maximum(discriminant, 0)
-    sqrt_disc = np.sqrt(discriminant)
-    
-    k1 = H + sqrt_disc
-    k2 = H - sqrt_disc
-    
-    return k1, k2
+    normal_vieja = np.cross(u, v)
+    ndot = np.einsum("ij,ij->i", normal_vieja, normal)[:, np.newaxis]
+    perpendicular = normal - ndot * normal_vieja
+    with np.errstate(divide="ignore", invalid="ignore"):
+        delta = (normal_vieja + normal) / (1.0 + ndot)
+    nuevo_u = u - delta * np.einsum("ij,ij->i", u, perpendicular)[:, np.newaxis]
+    nuevo_v = v - delta * np.einsum("ij,ij->i", v, perpendicular)[:, np.newaxis]
+    opuesta = ndot[:, 0] <= -1.0
+    nuevo_u[opuesta], nuevo_v[opuesta] = -u[opuesta], -v[opuesta]
+    return nuevo_u, nuevo_v
 
 
-def approximate_principal_directions(mesh, k1, k2):
-    """
-    Aproximación de direcciones principales usando vecinos.
-    Basado en gradientes de curvatura.
-    """
-    vertices = mesh.vertices
-    normals = mesh.vertex_normals
-    N = len(vertices)
-    
-    d1 = np.zeros((N, 3))
-    d2 = np.zeros((N, 3))
-    
-    # Construir vecindad
-    vertex_neighbors = [set() for _ in range(N)]
-    for face in mesh.faces:
-        for i in range(3):
-            v1, v2, v3 = face[i], face[(i+1)%3], face[(i+2)%3]
-            vertex_neighbors[v1].add(v2)
-            vertex_neighbors[v1].add(v3)
-    
-    for i in range(N):
-        n = normals[i]
-        neighbors = list(vertex_neighbors[i])
-        
-        if len(neighbors) < 2:
-            # Caso degenerado: usar base arbitraria
-            if abs(n[0]) < 0.9:
-                u = np.cross(n, [1, 0, 0])
-            else:
-                u = np.cross(n, [0, 1, 0])
-            u = u / np.linalg.norm(u)
-            v = np.cross(n, u)
-            d1[i] = u
-            d2[i] = v
-            continue
-        
-        # Aproximar dirección de máxima curvatura usando gradiente de k1
-        grad_k1 = np.zeros(3)
-        for j in neighbors:
-            edge_vec = vertices[j] - vertices[i]
-            # Proyectar al plano tangente
-            edge_tangent = edge_vec - np.dot(edge_vec, n) * n
-            norm = np.linalg.norm(edge_tangent)
-            if norm > 1e-8:
-                edge_tangent /= norm
-                # Aproximar gradiente
-                grad_k1 += (k1[j] - k1[i]) * edge_tangent
-        
-        grad_norm = np.linalg.norm(grad_k1)
-        
-        if grad_norm > 1e-8:
-            # d1 alineado con gradiente (perpendicular a isolíneas)
-            d1[i] = grad_k1 / grad_norm
-            # d2 perpendicular a d1 en plano tangente
-            d2[i] = np.cross(n, d1[i])
+def _cambio_de_base(u_viejo, v_viejo, u_nuevo, v_nuevo):
+    """Cosenos (u1, v1, u2, v2) entre la base nueva, girada al plano de la
+    vieja, y la base vieja."""
+    u_girado, v_girado = _rotar_base(u_nuevo, v_nuevo, np.cross(u_viejo, v_viejo))
+    return (np.einsum("ij,ij->i", u_girado, u_viejo), np.einsum("ij,ij->i", u_girado, v_viejo),
+            np.einsum("ij,ij->i", v_girado, u_viejo), np.einsum("ij,ij->i", v_girado, v_viejo))
+
+
+def _proyectar_curvatura(u_viejo, v_viejo, ku, kuv, kv, u_nuevo, v_nuevo):
+    """Expresa el tensor de curvatura [[ku, kuv], [kuv, kv]] en otra base."""
+    u1, v1, u2, v2 = _cambio_de_base(u_viejo, v_viejo, u_nuevo, v_nuevo)
+    return (ku * u1 * u1 + kuv * 2 * u1 * v1 + kv * v1 * v1,
+            ku * u1 * u2 + kuv * (u1 * v2 + u2 * v1) + kv * v1 * v2,
+            ku * u2 * u2 + kuv * 2 * u2 * v2 + kv * v2 * v2)
+
+
+def _proyectar_derivada(u_viejo, v_viejo, C, u_nuevo, v_nuevo):
+    """Expresa el tensor simétrico C = (C111, C112, C122, C222) en otra base."""
+    u1, v1, u2, v2 = _cambio_de_base(u_viejo, v_viejo, u_nuevo, v_nuevo)
+    c0, c1, c2, c3 = C.T
+    return np.stack([
+        c0 * u1**3 + c1 * 3 * u1 * u1 * v1 + c2 * 3 * u1 * v1 * v1 + c3 * v1**3,
+        c0 * u1 * u1 * u2 + c1 * (u1 * u1 * v2 + 2 * u2 * u1 * v1)
+        + c2 * (u2 * v1 * v1 + 2 * u1 * v1 * v2) + c3 * v1 * v1 * v2,
+        c0 * u1 * u2 * u2 + c1 * (u2 * u2 * v1 + 2 * u1 * u2 * v2)
+        + c2 * (u1 * v2 * v2 + 2 * u2 * v2 * v1) + c3 * v1 * v2 * v2,
+        c0 * u2**3 + c1 * 3 * u2 * u2 * v2 + c2 * 3 * u2 * v2 * v2 + c3 * v2**3,
+    ], axis=1)
+
+
+def _base_de_cara(vertices, faces):
+    """Aristas de cada cara (la arista i es la opuesta al vértice i) y una base
+    ortonormal (t, b) de su plano."""
+    e = [vertices[faces[:, (i + 2) % 3]] - vertices[faces[:, (i + 1) % 3]] for i in range(3)]
+    t = _normalizar(e[0])
+    b = _normalizar(np.cross(np.cross(e[0], e[1]), t))
+    return e, t, b
+
+
+def _resolver(matrices, lados):
+    """Resuelve un sistema por cara. Devuelve también qué caras lo tenían
+    resoluble: una cara degenerada queda con solución cero y fuera del reparto."""
+    escala = np.abs(matrices).max(axis=(1, 2))
+    resolubles = np.abs(np.linalg.det(matrices)) > 1e-12 * escala ** matrices.shape[1]
+    soluciones = np.zeros_like(lados)
+    soluciones[resolubles] = np.linalg.solve(matrices[resolubles], lados[resolubles][..., np.newaxis])[..., 0]
+    return soluciones, resolubles
+
+
+def _repartir(faces, valores, pesos, n_vertices):
+    """Suma en cada vértice los valores de sus esquinas, ponderados."""
+    total = np.zeros((n_vertices,) + valores.shape[2:])
+    for esquina in range(3):
+        aporte = valores[:, esquina] * pesos[:, esquina].reshape((-1,) + (1,) * (valores.ndim - 2))
+        if aporte.ndim == 1:
+            total += np.bincount(faces[:, esquina], aporte, n_vertices)
         else:
-            # Sin gradiente claro: usar base arbitraria
-            if abs(n[0]) < 0.9:
-                u = np.cross(n, [1, 0, 0])
-            else:
-                u = np.cross(n, [0, 1, 0])
-            u = u / np.linalg.norm(u)
-            v = np.cross(n, u)
-            d1[i] = u
-            d2[i] = v
-    
-    return d1, d2
+            for k in range(aporte.shape[1]):
+                total[:, k] += np.bincount(faces[:, esquina], aporte[:, k], n_vertices)
+    return total
+
+
+def compute_curvatures(vertices, faces, normals, corner_areas, point_areas):
+    """Curvaturas y direcciones principales por vértice (Rusinkiewicz 2004).
+
+    Devuelve k1, k2, d1 y d2 con |k1| >= |k2|. Con las normales hacia afuera,
+    la curvatura es positiva donde la superficie es convexa.
+    """
+    n_vertices = len(vertices)
+    # base tangente inicial de cada vértice, a partir de una arista que sale de él
+    d1 = np.zeros_like(vertices)
+    for i in range(3):
+        d1[faces[:, i]] = vertices[faces[:, (i + 1) % 3]] - vertices[faces[:, i]]
+    d1 = _normalizar(np.cross(d1, normals))
+    d2 = np.cross(normals, d1)
+
+    # ajuste de II por cara: la diferencia de normales a lo largo de cada arista
+    # (dnu, dnv) debe ser II (u, v), con (u, v) la arista en la base de la cara
+    e, t, b = _base_de_cara(vertices, faces)
+    sistema = np.zeros((len(faces), 3, 3))
+    lado = np.zeros((len(faces), 3))
+    for j in range(3):
+        u = np.einsum("ij,ij->i", e[j], t)
+        v = np.einsum("ij,ij->i", e[j], b)
+        dn = normals[faces[:, (j + 2) % 3]] - normals[faces[:, (j + 1) % 3]]
+        dnu = np.einsum("ij,ij->i", dn, t)
+        dnv = np.einsum("ij,ij->i", dn, b)
+        sistema[:, 0, 0] += u * u
+        sistema[:, 0, 1] += u * v
+        sistema[:, 2, 2] += v * v
+        lado[:, 0] += dnu * u
+        lado[:, 1] += dnu * v + dnv * u
+        lado[:, 2] += dnv * v
+    sistema[:, 1, 1] = sistema[:, 0, 0] + sistema[:, 2, 2]
+    sistema[:, 1, 2] = sistema[:, 0, 1]
+    sistema[:, 1, 0] = sistema[:, 0, 1]
+    sistema[:, 2, 1] = sistema[:, 1, 2]
+    tensor_cara, validas = _resolver(sistema, lado)
+
+    # cada esquina lleva el tensor de su cara a la base de su vértice
+    esquinas = np.zeros((len(faces), 3, 3))
+    for j in range(3):
+        vj = faces[:, j]
+        esquinas[:, j] = np.stack(_proyectar_curvatura(t, b, *tensor_cara.T, d1[vj], d2[vj]), axis=1)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        pesos = np.nan_to_num(corner_areas / point_areas[faces]) * validas[:, np.newaxis]
+    ku, kuv, kv = _repartir(faces, esquinas, pesos, n_vertices).T
+
+    # diagonalización por un giro de Jacobi
+    with np.errstate(divide="ignore", invalid="ignore"):
+        h = 0.5 * (kv - ku) / kuv
+        tt = np.where(h < 0, 1.0 / (h - np.sqrt(1 + h * h)), 1.0 / (h + np.sqrt(1 + h * h)))
+    tt[kuv == 0] = 0.0
+    c = 1.0 / np.sqrt(1 + tt * tt)
+    s = tt * c
+    k1 = ku - tt * kuv
+    k2 = kv + tt * kuv
+    cambia = np.abs(k1) < np.abs(k2)
+    k1[cambia], k2[cambia] = k2[cambia], k1[cambia].copy()
+    d1_nueva = np.where(cambia[:, np.newaxis], s[:, np.newaxis] * d1 + c[:, np.newaxis] * d2,
+                        c[:, np.newaxis] * d1 - s[:, np.newaxis] * d2)
+    return k1, k2, d1_nueva, np.cross(normals, d1_nueva)
+
+
+def compute_curvature_derivatives(vertices, faces, k1, k2, d1, d2, corner_areas, point_areas):
+    """Tensor C de derivadas de la curvatura por vértice, en la base (d1, d2).
+
+    Sus cuatro componentes (C111, C112, C122, C222) dan la derivada de II en
+    cualquier dirección (u, v): [[C111 u + C112 v, C112 u + C122 v],
+    [C112 u + C122 v, C122 u + C222 v]].
+    """
+    e, t, b = _base_de_cara(vertices, faces)
+    # II de cada vértice expresado en la base de la cara
+    tensores = [np.stack(_proyectar_curvatura(d1[faces[:, j]], d2[faces[:, j]], k1[faces[:, j]],
+                                              np.zeros(len(faces)), k2[faces[:, j]], t, b), axis=1)
+                for j in range(3)]
+    sistema = np.zeros((len(faces), 4, 4))
+    lado = np.zeros((len(faces), 4))
+    for j in range(3):
+        dII = tensores[(j + 2) % 3] - tensores[(j + 1) % 3]
+        u = np.einsum("ij,ij->i", e[j], t)
+        v = np.einsum("ij,ij->i", e[j], b)
+        sistema[:, 0, 0] += u * u
+        sistema[:, 0, 1] += u * v
+        sistema[:, 3, 3] += v * v
+        lado[:, 0] += u * dII[:, 0]
+        lado[:, 1] += v * dII[:, 0] + 2 * u * dII[:, 1]
+        lado[:, 2] += 2 * v * dII[:, 1] + u * dII[:, 2]
+        lado[:, 3] += v * dII[:, 2]
+    sistema[:, 1, 1] = 2 * sistema[:, 0, 0] + sistema[:, 3, 3]
+    sistema[:, 1, 2] = 2 * sistema[:, 0, 1]
+    sistema[:, 2, 2] = sistema[:, 0, 0] + 2 * sistema[:, 3, 3]
+    sistema[:, 2, 3] = sistema[:, 0, 1]
+    for fila, columna in ((0, 1), (1, 2), (2, 3)):
+        sistema[:, columna, fila] = sistema[:, fila, columna]
+    C_cara, validas = _resolver(sistema, lado)
+
+    esquinas = np.stack([_proyectar_derivada(t, b, C_cara, d1[faces[:, j]], d2[faces[:, j]])
+                         for j in range(3)], axis=1)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        pesos = np.nan_to_num(corner_areas / point_areas[faces]) * validas[:, np.newaxis]
+    return _repartir(faces, esquinas, pesos, len(vertices))
+
+
+def compute_feature_size(k1, k2, radius):
+    """Tamaño de rasgo de la malla, la longitud que vuelve adimensionales los
+    umbrales: una curvatura se multiplica por él y su derivada, por su cuadrado.
+
+    Es el de rtsc: 0,01 dividido por el percentil 10 de |k1| y |k2|, con un
+    tope del 5 % del radio de la esfera envolvente. rtsc estima el percentil
+    con 500 vértices al azar; aquí se usan todos, así no depende del orden de
+    los vértices en el archivo.
+    """
+    percentil = np.percentile(np.abs(np.concatenate([k1, k2])), 10)
+    return min(0.01 / percentil if percentil > 0 else np.inf, 0.05 * radius)
+
 
 def build_smoothing_operator(mesh):
     """
@@ -247,8 +285,7 @@ def build_smoothing_operator(mesh):
     (A @ phi)[i] es el promedio de phi sobre los vecinos de i. Con ella el
     suavizado laplaciano de un atributo es un producto matriz-vector, en vez
     de un doble bucle en Python. El operador depende solo de la topología de la
-    malla, así que se construye una vez y se reusa en cada iteración y cada vez
-    que cambian las perillas de difusión.
+    malla, así que se construye una vez y se reusa en cada iteración.
     """
     N = len(mesh.vertices)
     edges = mesh.edges_unique
@@ -262,32 +299,20 @@ def build_smoothing_operator(mesh):
     return sp.diags(1.0 / degree) @ adjacency
 
 
-def smooth_vertex_attribute(mesh, attribute, iterations=3, lambda_factor=0.5, operator=None):
+def smooth_normals(normals, operator, iterations, lambda_factor=0.5):
     """
-    Suavizado laplaciano de un atributo por vértice.
+    Difusión de las normales sobre la malla.
 
-    Es una difusión sobre la variedad: cada iteración mezcla el valor del
-    vértice con el promedio de sus vecinos,
+    Cada iteración mezcla la normal del vértice con el promedio de sus vecinos,
 
-        phi_i <- (1 - lambda) * phi_i + lambda * mean_{j in N(i)} phi_j,
+        n_i <- (1 - lambda) * n_i + lambda * mean_{j in N(i)} n_j,
 
-    que es Euler explícito de la ecuación del calor con el laplaciano de grafo
-    (compara con `difusion_calor`, que resuelve la misma ecuación sobre una
-    grilla 2D). El promedio de vecinos se escribe como `operator @ phi`.
-
-    Args:
-        mesh: trimesh object
-        attribute: array (N,) con valores por vértice
-        iterations: número de pasos de difusión
-        lambda_factor: factor de difusión (0-1, mayor = más suavizado por paso)
-        operator: matriz de promediado precalculada (ver build_smoothing_operator);
-                  si es None se construye al vuelo
-
-    Returns:
-        attribute_smooth: array suavizado
+    y la vuelve a normalizar. Es Euler explícito de la ecuación del calor con el
+    laplaciano de grafo (compara con `difusion_calor`, que resuelve la misma
+    ecuación sobre una grilla 2D). Como las curvaturas se estiman de cómo
+    cambian las normales, difundirlas suaviza las curvaturas y sus derivadas.
     """
-    averaging = operator if operator is not None else build_smoothing_operator(mesh)
-    phi = attribute.astype(float).copy()
+    suavizadas = normals.copy()
     for _ in range(iterations):
-        phi = (1.0 - lambda_factor) * phi + lambda_factor * (averaging @ phi)
-    return phi
+        suavizadas = _normalizar((1.0 - lambda_factor) * suavizadas + lambda_factor * (operator @ suavizadas))
+    return suavizadas

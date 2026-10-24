@@ -67,9 +67,10 @@ RECETAS = {
     "image_pixel": [Toma(args=["assets/santiago.png"], cuadros=2)],
     "image_texture": [Toma(args=["assets/bricks.jpg"], cuadros=2)],
     "texture_viewer": [Toma(args=["assets/dice_cube.obj"], cuadros=2)],
-    # suggestive contours: relleno papel y los campos de curvatura
+    # suggestive contours: el dibujo de líneas del conejo y de Samus, y el campo kr
     "suggestive_contours": [
-        Toma(sufijo="papel", args=["assets/samus/posed.obj"], cuadros=2),
+        Toma(sufijo="conejo", args=["assets/Stanford_Bunny.stl"], cuadros=2),
+        Toma(sufijo="samus", args=["assets/samus/posed.obj"], cuadros=2),
         Toma(sufijo="radial", args=["assets/samus/posed.obj"], teclas=["V", "V", "V"], cuadros=2),
     ],
     # ray tracing: varios estados en la misma escena

@@ -1,271 +1,146 @@
 """
-Suggestive contours con curvatura radial.
+Contornos y suggestive contours de una malla, para una cámara dada.
+
+Sigue la implementación de referencia (rtsc) de DeCarlo, Finkelstein y
+Rusinkiewicz (2004). Por cada vértice se calculan n.v, la curvatura radial y
+la prueba de la derivada; luego, en cada cara donde un campo cambia de signo,
+se traza un segmento entre los dos cruces por cero de sus aristas.
 """
 import numpy as np
 
 
-def compute_radial_curvature(mesh, camera_pos, k1, k2, d1, d2):
+def compute_view_quantities(vertices, normals, k1, k2, d1, d2, C, camera_pos, threshold):
+    """Cantidades por vértice que dependen de la cámara.
+
+    Con `vista` el vector unitario hacia la cámara y (u, v) sus componentes
+    sobre las direcciones principales d1 y d2, devuelve:
+
+    - ndotv = n.vista, que vale cero en el contorno.
+    - kr = k1 u^2 + k2 v^2, que es la curvatura radial multiplicada por
+      sin^2(theta), con theta el ángulo entre n y la vista. Tiene los mismos
+      ceros que la curvatura radial y no se indefine cuando la cámara mira de
+      frente.
+    - La prueba de la derivada como fracción test_num / test_den, que es
+      positiva donde D_w kr tan(theta) supera `threshold`. El numerador y el
+      denominador se interpolan por separado sobre la cara, porque el cociente
+      se dispara donde n.vista vale cero.
     """
-    Calcula la curvatura radial κᵣ para cada vértice.
-    κᵣ = k₁·cos²(θ) + k₂·sin²(θ)
-    
-    donde θ es el ángulo entre el vector de vista proyectado
-    y la dirección principal d1.
-    
-    Args:
-        mesh: trimesh.Trimesh object
-        camera_pos: posición de la cámara (x, y, z)
-        k1, k2: curvaturas principales por vértice
-        d1, d2: direcciones principales por vértice
-    
-    Returns:
-        kr: curvatura radial por vértice (N,)
+    vista = camera_pos - vertices
+    vista /= np.linalg.norm(vista, axis=1, keepdims=True)
+    ndotv = np.einsum("ij,ij->i", vista, normals)
+    u = np.einsum("ij,ij->i", vista, d1)
+    v = np.einsum("ij,ij->i", vista, d2)
+    u2, v2 = u * u, v * v
+    kr = k1 * u2 + k2 * v2
+
+    # D_w kr en un cero de kr (DeCarlo et al. 2004, apéndice C) es la derivada
+    # de la curvatura en la dirección de vista, C(w, w, w), menos un término por
+    # el giro de w sobre la superficie, que depende de la torsión geodésica tau.
+    # Dividido por ndotv, test_num da D_w kr tan(theta) menos el umbral
+    with np.errstate(divide="ignore", invalid="ignore"):
+        sin2 = np.maximum(u2 + v2, 1e-12)
+        derivada = (u2 * (u * C[:, 0] + 3 * v * C[:, 1]) + v2 * (3 * u * C[:, 2] + v * C[:, 3])) / sin2
+        tau = (k2 - k1) * u * v / sin2
+    test_num = derivada - 2 * ndotv * tau * tau - threshold * ndotv
+    return ndotv, kr, test_num, ndotv
+
+
+def radial_curvature(kr, ndotv):
+    """La curvatura radial propiamente tal, para pintarla sobre la malla."""
+    return kr / np.maximum(1.0 - ndotv * ndotv, 1e-6)
+
+
+def extract_isolines(vertices, faces, field, test_num=None, test_den=None, ndotv=None, fade=0.0):
+    """Segmentos donde `field` cruza por cero, uno por cara.
+
+    En cada cara con valores de distinto signo, el vértice de signo distinto a
+    los otros dos define las dos aristas que cruza la curva; el cruce en cada
+    una se interpola linealmente. Si hay prueba, el segmento se recorta a las
+    partes donde test_num / test_den es positivo (sin denominador, donde test_num
+    lo es). Con `ndotv` se descartan las caras que dan la espalda a la cámara.
+
+    Devuelve los extremos de los segmentos (S, 2, 3) y la opacidad de cada
+    extremo (S, 2). Con `fade` positivo la opacidad crece desde cero en el
+    borde del recorte: es x / (fade + x), con x = test_num / test_den.
     """
-    vertices = mesh.vertices
-    normals = mesh.vertex_normals
-    N = len(vertices)
-    
-    # Vector de vista por vértice (de vértice hacia cámara)
-    view_vectors = camera_pos - vertices  # (N, 3)
-    view_vectors = view_vectors / np.linalg.norm(view_vectors, axis=1, keepdims=True)
-    
-    # Proyectar vector de vista al plano tangente
-    # w = v - (v·n)n
-    ndotv = np.sum(normals * view_vectors, axis=1, keepdims=True)  # (N, 1)
-    w = view_vectors - ndotv * normals  # (N, 3)
-    
-    # Normalizar w
-    w_norm = np.linalg.norm(w, axis=1, keepdims=True)
-    w = w / (w_norm + 1e-10)  # evitar división por cero
-    
-    # Calcular ángulo θ con dirección principal d1
-    # cos(θ) = w · d1
-    cos_theta = np.sum(w * d1, axis=1)  # (N,)
-    cos_theta = np.clip(cos_theta, -1.0, 1.0)
-    
-    # sin²(θ) = 1 - cos²(θ)
-    cos2_theta = cos_theta**2
-    sin2_theta = 1 - cos2_theta
-    
-    # Curvatura radial
-    kr = k1 * cos2_theta + k2 * sin2_theta
-    
-    return kr
+    valores = field[faces]
+    candidatas = (valores > 0).any(1) & (valores < 0).any(1)
+    if ndotv is not None:
+        candidatas &= (ndotv[faces] > 0).any(1)
+    if test_num is not None:
+        num = test_num[faces]
+        den = np.ones_like(num) if test_den is None else test_den[faces]
+        # se descarta la cara si la prueba falla en sus tres vértices
+        candidatas &= ~(((num <= 0) & (den >= 0)).all(1) | ((num >= 0) & (den <= 0)).all(1))
+    caras = faces[candidatas]
+    valores = valores[candidatas]
 
+    # vértice de signo distinto, con la misma prioridad que rtsc ante los ceros
+    distinto = np.full(len(caras), 2)
+    for i in (1, 0):
+        otros = valores[:, [(i + 1) % 3, (i + 2) % 3]]
+        es = ((valores[:, i] < 0) & (otros >= 0).all(1)) | ((valores[:, i] > 0) & (otros <= 0).all(1))
+        distinto[es] = i
+    filas = np.arange(len(caras))[:, np.newaxis]
+    a, b, c = caras[filas, (distinto[:, np.newaxis] + np.arange(3)) % 3].T
 
-def extract_contour_points(mesh, kr, dkr, threshold=0.0):
-    # Esta función corre cada frame (kr depende de la cámara), así que el test
-    # de cruce por cero se vectoriza sobre todas las aristas a la vez en vez de
-    # iterarlas en Python.
-    edges = mesh.edges_unique
-    v1 = edges[:, 0]
-    v2 = edges[:, 1]
-    kr1 = kr[v1]
-    kr2 = kr[v2]
+    # cruces por cero en las aristas a-b y a-c
+    t_ab = (field[a] / (field[a] - field[b]))[:, np.newaxis]
+    t_ac = (field[a] / (field[a] - field[c]))[:, np.newaxis]
+    p1 = (1 - t_ab) * vertices[a] + t_ab * vertices[b]
+    p2 = (1 - t_ac) * vertices[a] + t_ac * vertices[c]
+    if test_num is None:
+        segmentos = np.stack([p1, p2], axis=1)
+        return segmentos, np.ones((len(segmentos), 2))
 
-    # Aristas con cruce por cero (kr de distinto signo en los extremos) cuya
-    # derivada radial interpolada supera el umbral de selección. La derivada
-    # debe ser positiva: en un suggestive contour la curvatura radial crece en
-    # dirección a la cámara (DeCarlo et al. 2003).
-    crossing = kr1 * kr2 < 0
-    abs1 = np.abs(kr1)
-    abs2 = np.abs(kr2)
-    denom = abs1 + abs2
-    denom[denom == 0] = 1.0
-    t = abs1 / denom
-    dkr_interp = (1 - t) * dkr[v1] + t * dkr[v2]
+    # la prueba en los extremos y sus cruces por cero a lo largo del segmento
+    def en_los_extremos(campo):
+        return ((1 - t_ab[:, 0]) * campo[a] + t_ab[:, 0] * campo[b],
+                (1 - t_ac[:, 0]) * campo[a] + t_ac[:, 0] * campo[c])
 
-    # Dw(kr) no está normalizado: su magnitud varía con la escala de la malla y
-    # con la discretización, así que un umbral absoluto no es portable entre
-    # modelos. Lo expresamos como fracción de una escala robusta (el percentil
-    # 90 de la derivada positiva en los cruces). Así `threshold` vive en [0, 1):
-    # 0 conserva todos los cruces con derivada positiva (la definición básica),
-    # subirlo recorta los contornos en zonas casi planas y deja los marcados.
-    positive = crossing & (dkr_interp > 0)
-    if np.any(positive):
-        scale = np.percentile(dkr_interp[positive], 90)
-    else:
-        scale = 1.0
-    if scale <= 0:
-        scale = 1.0
-    selected = crossing & (dkr_interp > threshold * scale)
+    num1, num2 = en_los_extremos(test_num)
+    den1, den2 = en_los_extremos(test_den) if test_den is not None else (np.ones(len(a)),) * 2
+    with np.errstate(divide="ignore", invalid="ignore"):
+        cruce_num = np.where((num1 >= 0) != (num2 >= 0), num1 / (num1 - num2), np.nan)
+        cruce_den = np.where((den1 >= 0) != (den2 >= 0), den1 / (den1 - den2), np.nan)
+    cortes = np.sort(np.stack([cruce_num, cruce_den], 1), axis=1)  # los nan quedan al final
+    n_cortes = (~np.isnan(cortes)).sum(1)
+    valido = (num1 >= 0) == (den1 >= 0)
 
-    if not np.any(selected):
-        return np.array([]), [], np.array([])
+    # tramos válidos: la validez se invierte en cada corte
+    tramos = []
+    inicio = np.zeros(len(a))
+    for k in range(3):
+        fin = cortes[:, k] if k < 2 else np.ones(len(a))
+        fin = np.where(k < n_cortes, fin, 1.0)
+        activo = valido & (k <= n_cortes) & (fin > inicio)
+        tramos.append((activo, inicio.copy(), fin.copy()))
+        valido = valido != (k < n_cortes)
+        inicio = np.where(k < n_cortes, fin, 2.0)
 
-    ts = t[selected][:, np.newaxis]
-    p1 = mesh.vertices[v1[selected]]
-    p2 = mesh.vertices[v2[selected]]
-    contour_points = (1 - ts) * p1 + ts * p2
+    segmentos, opacidades = [], []
+    for activo, desde, hasta in tramos:
+        extremos = np.stack([desde[activo], hasta[activo]], 1)[..., np.newaxis]
+        segmentos.append((1 - extremos) * p1[activo, np.newaxis] + extremos * p2[activo, np.newaxis])
+        num = (1 - extremos[..., 0]) * num1[activo, np.newaxis] + extremos[..., 0] * num2[activo, np.newaxis]
+        den = (1 - extremos[..., 0]) * den1[activo, np.newaxis] + extremos[..., 0] * den2[activo, np.newaxis]
+        if fade > 0:
+            with np.errstate(divide="ignore", invalid="ignore"):
+                opacidades.append(np.nan_to_num(num / (den * fade + num), nan=1.0).clip(0, 1))
+        else:
+            opacidades.append(np.ones_like(num))
+    return np.concatenate(segmentos), np.concatenate(opacidades)
 
-    # Distancia a cero del kr interpolado: alimenta la transparencia.
-    kr_interp = (1 - t[selected]) * kr1[selected] + t[selected] * kr2[selected]
-    contour_kr_values = np.abs(kr_interp)
-
-    contour_edges = chain_contour_segments(contour_points, max_distance=0.1)
-
-    return contour_points, contour_edges, contour_kr_values
-
-
-def extract_zero_crossings(mesh, field, max_distance=0.1):
-    """Líneas donde un campo escalar por vértice cruza por cero.
-
-    Para cada arista cuyos extremos tienen signo opuesto en `field` interpola
-    linealmente el punto de cruce y luego encadena los puntos con el mismo k-d
-    tree que usan los contornos sugestivos. A diferencia de estos, no hay
-    condición de derivada ni dependencia de la cámara: el resultado solo cambia
-    si cambia `field`.
-
-    Con field = k1 da las crestas y con field = k2 los valles (las líneas donde
-    una curvatura principal cambia de signo). Como k1 = 0 o k2 = 0 implica
-    curvatura gaussiana K = 0, son las curvas parabólicas que separan las zonas
-    elípticas de las hiperbólicas de la superficie.
-    """
-    edges = mesh.edges_unique
-    f1 = field[edges[:, 0]]
-    f2 = field[edges[:, 1]]
-
-    crossing = f1 * f2 < 0
-    if not np.any(crossing):
-        return np.array([]), []
-
-    v1 = edges[crossing, 0]
-    v2 = edges[crossing, 1]
-    abs1 = np.abs(f1[crossing])
-    abs2 = np.abs(f2[crossing])
-    t = (abs1 / (abs1 + abs2))[:, np.newaxis]
-    points = (1 - t) * mesh.vertices[v1] + t * mesh.vertices[v2]
-
-    segment_edges = chain_contour_segments(points, max_distance=max_distance)
-    return points, segment_edges
-
-
-def chain_contour_segments(points, max_distance=0.05):
-    if len(points) < 2:
-        return []
-    
-    from scipy.spatial import cKDTree
-    
-    tree = cKDTree(points)
-    visited = set()
-    edges = []
-    
-    # Para cada punto, intentar formar una cadena
-    for start_idx in range(len(points)):
-        if start_idx in visited:
-            continue
-        
-        # Iniciar cadena
-        chain = [start_idx]
-        visited.add(start_idx)
-        current = start_idx
-        
-        # Extender cadena hacia adelante
-        while True:
-            distances, neighbors = tree.query(points[current], k=4)
-            found_next = False
-            
-            for dist, neighbor in zip(distances[1:], neighbors[1:]):
-                if neighbor not in visited and dist < max_distance:
-                    chain.append(neighbor)
-                    visited.add(neighbor)
-                    current = neighbor
-                    found_next = True
-                    break
-            
-            if not found_next:
-                break
-        
-        # Convertir cadena a edges
-        for i in range(len(chain) - 1):
-            edges.append((chain[i], chain[i+1]))
-    
-    return edges
 
 def extract_silhouette_edges(mesh, camera_pos):
-    vertices = mesh.vertices
-    faces = mesh.faces
-    face_normals = mesh.face_normals
-    
-    # Calcular visibilidad de cada cara
-    face_centers = np.mean(vertices[faces], axis=1)
-    view_vectors = camera_pos - face_centers
-    view_vectors = view_vectors / np.linalg.norm(view_vectors, axis=1, keepdims=True)
-    
-    face_dot = np.sum(face_normals * view_vectors, axis=1)
-    face_visibility = face_dot > 0
-    
-    # Usar face_adjacency para obtener pares de caras adyacentes
-    adjacency = mesh.face_adjacency
-    
-    # Filtrar solo pares con visibilidad opuesta
-    vis_pairs = face_visibility[adjacency]
-    is_silhouette = vis_pairs[:, 0] != vis_pairs[:, 1]
-    silhouette_face_pairs = adjacency[is_silhouette]
-    
-    if len(silhouette_face_pairs) == 0:
-        return np.array([]), []
-    
-    # Para cada par de caras adyacentes, encontrar la arista compartida
-    silhouette_edges_list = []
-    for f1, f2 in silhouette_face_pairs:
-        # Encontrar vértices compartidos entre las dos caras
-        shared = np.intersect1d(faces[f1], faces[f2])
-        if len(shared) == 2:
-            silhouette_edges_list.append(shared)
-    
-    if len(silhouette_edges_list) == 0:
-        return np.array([]), []
-    
-    silhouette_edges_array = np.array(silhouette_edges_list)
-    
-    # Crear lista de puntos duplicados para GL_LINES
-    silhouette_points = vertices[silhouette_edges_array.flatten()]
-    num_edges = len(silhouette_edges_array)
-    silhouette_edges = np.arange(num_edges * 2).reshape(-1, 2)
-    
-    return silhouette_points, silhouette_edges
+    """Aristas entre una cara que mira a la cámara y otra que no.
 
-def compute_radial_curvature_derivative(mesh, camera_pos, k1, k2, d1, d2, kr):
+    Es el contorno exacto de un poliedro. Devuelve los segmentos (S, 2, 3) y su
+    opacidad, como extract_isolines.
     """
-    Calcula la derivada de kr en dirección de vista: D_w kr.
-
-    Por vértice estima la derivada direccional como el promedio, sobre sus
-    vecinos, de (kr[j] - kr[i]) dividido por la proyección de la arista (j - i)
-    sobre w (la dirección de vista proyectada al plano tangente). Como depende
-    de la cámara, se recalcula cada frame; por eso está vectorizada sobre todas
-    las aristas a la vez (la versión con doble bucle de Python tardaba ~2 s en
-    una malla de 8k vértices, contra unos pocos ms aquí).
-    """
-    vertices = mesh.vertices
-    normals = mesh.vertex_normals
-    N = len(vertices)
-
-    # Vector de vista por vértice, proyectado al plano tangente y normalizado.
-    view_vectors = camera_pos - vertices
-    view_vectors = view_vectors / np.linalg.norm(view_vectors, axis=1, keepdims=True)
-    ndotv = np.sum(normals * view_vectors, axis=1, keepdims=True)
-    w = view_vectors - ndotv * normals
-    w = w / (np.linalg.norm(w, axis=1, keepdims=True) + 1e-10)
-
-    # Cada arista única aporta una diferencia direccional a sus dos extremos, así
-    # que la duplicamos en ambos sentidos (origen -> destino y destino -> origen)
-    # para reproducir el promedio sobre vecinos del cálculo por vértice.
-    edges = mesh.edges_unique
-    src = np.concatenate([edges[:, 0], edges[:, 1]])
-    dst = np.concatenate([edges[:, 1], edges[:, 0]])
-
-    diff = vertices[dst] - vertices[src]
-    proj = np.sum(diff * w[src], axis=1)
-    # Aristas casi perpendiculares a w no informan sobre la derivada en w.
-    valid = np.abs(proj) > 1e-8
-    estimate = (kr[dst] - kr[src])[valid] / proj[valid]
-    src_valid = src[valid]
-
-    sums = np.bincount(src_valid, weights=estimate, minlength=N)
-    counts = np.bincount(src_valid, minlength=N)
-    dkr = np.zeros(N)
-    nonzero = counts > 0
-    dkr[nonzero] = sums[nonzero] / counts[nonzero]
-
-    return dkr
+    centros = mesh.triangles_center
+    de_frente = np.einsum("ij,ij->i", mesh.face_normals, camera_pos - centros) > 0
+    pares = mesh.face_adjacency
+    silueta = de_frente[pares[:, 0]] != de_frente[pares[:, 1]]
+    segmentos = mesh.vertices[mesh.face_adjacency_edges[silueta]]
+    return segmentos, np.ones((len(segmentos), 2))

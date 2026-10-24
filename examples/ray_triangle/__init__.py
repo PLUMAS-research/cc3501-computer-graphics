@@ -29,12 +29,11 @@ import click
 import numpy as np
 import pyglet
 import pyglet.gl as GL
-import trimesh as tm
 
 import grafica.transformations as tr
 from grafica.intersections import ray_triangle_intersection
 from grafica.ui import InfoPanel, ui_overlay
-from grafica.utils import load_pipeline
+from grafica.utils import load_pipeline, load_single_mesh
 
 from .octree import Octree
 
@@ -75,9 +74,7 @@ def ray_triangle_example(filename, width, height, capacidad, nivel_maximo):
     shader_dir = Path(__file__).parent
 
     # ---- malla ----
-    mesh = tm.load(filename)
-    if hasattr(mesh, "geometry"):
-        mesh = list(mesh.geometry.values())[0]
+    mesh = load_single_mesh(filename)
     mesh.fix_normals()
     # centrar en el origen y escalar a tamaño unitario.
     mesh.apply_translation(-mesh.centroid)

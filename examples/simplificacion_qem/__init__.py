@@ -25,13 +25,12 @@ import click
 import numpy as np
 import pyglet
 import pyglet.gl as GL
-import trimesh as tm
 
 import grafica.transformations as tr
 from grafica.arcball import Arcball
 from grafica.half_edge import HalfEdgeMesh
 from grafica.ui import InfoPanel, ui_overlay
-from grafica.utils import load_pipeline
+from grafica.utils import load_pipeline, load_single_mesh
 
 from .qem import simplificar_a_niveles
 
@@ -42,7 +41,7 @@ FRACCIONES = [1.0, 0.6, 0.4, 0.25, 0.15, 0.08]  # presupuestos como fraccion del
 
 def _cargar_normalizada(filename):
     """Carga el modelo y lo centra y escala para caber en el cubo [-1, 1]."""
-    tri = tm.load(filename, force="mesh")
+    tri = load_single_mesh(filename)
     vertices = np.asarray(tri.vertices, dtype=np.float64)
     centro = (vertices.min(0) + vertices.max(0)) / 2
     escala = 2.0 / (vertices.max(0) - vertices.min(0)).max()

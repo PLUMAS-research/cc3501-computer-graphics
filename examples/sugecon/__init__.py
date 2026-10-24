@@ -1,12 +1,11 @@
 import pyglet
 import pyglet.gl as GL
-import trimesh as tm
 import numpy as np
 import os
 import click
 from pathlib import Path
 
-from grafica.utils import load_pipeline
+from grafica.utils import load_pipeline, load_single_mesh
 from grafica.arcball import Arcball
 from grafica.ui import InfoPanel, ui_overlay
 import grafica.transformations as tr
@@ -63,15 +62,11 @@ def normalizar_simetrico(campo):
 )
 def suggestive_contours(model, width, height, subdividir):
     print(f"Cargando {model}...")
-    mesh = tm.load(model)
-
-    # Un OBJ con varias partes (como assets/samus/posed.obj) carga como Scene.
-    # El cálculo de curvatura de este ejemplo es por vértice, así que fusionamos
-    # las partes en una sola malla y el resto del código opera igual sobre
-    # vértices y caras. Las componentes desconectadas no interfieren entre sí.
-    if isinstance(mesh, tm.Scene):
-        print(f"OBJ con {len(mesh.geometry)} partes: fusionando en una sola malla...")
-        mesh = mesh.to_geometry()
+    # El cálculo de curvatura de este ejemplo es por vértice, así que todas las
+    # partes del modelo (Samus tiene varias) van en una sola malla, con los
+    # vértices de las costuras de textura soldados. Las componentes
+    # desconectadas no interfieren entre sí.
+    mesh = load_single_mesh(model)
 
     # Subdivisión Loop opcional: agrega aristas y suaviza la superficie límite.
     # Los contornos solo pueden caer en aristas donde kr cambia de signo, así que
@@ -80,7 +75,15 @@ def suggestive_contours(model, width, height, subdividir):
     # estimación de curvatura, no solo la densidad de aristas.
     if subdividir > 0:
         print(f"Subdividiendo {subdividir} paso(s) (Loop)...")
-        mesh = mesh.subdivide_loop(iterations=subdividir)
+        try:
+            mesh = mesh.subdivide_loop(iterations=subdividir)
+        except ValueError as error:
+            # Loop no está definido en una arista con más de dos caras, como las
+            # que hay donde se tocan piezas de la armadura de Samus. Los puntos
+            # medios agregan aristas, pero no suavizan la superficie
+            print(f"  Loop no se puede aplicar ({error}): se subdivide por puntos medios")
+            for _ in range(subdividir):
+                mesh = mesh.subdivide()
 
     print("Normalizando geometría...")
     mesh.apply_translation(-mesh.centroid)

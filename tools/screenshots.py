@@ -80,6 +80,16 @@ RECETAS = {
         Toma(sufijo="rt", teclas=["T"], cuadros=600),  # deja completar el render progresivo
     ],
     "raytracing_basico": [Toma(cuadros=600)],  # render progresivo por CPU
+    # BSP y kd-tree sobre E1M1: el inicio, el kd-tree, el orden de dibujo de
+    # Doom, el mapa acercado y un segundo avanzando hacia el norte
+    "raytracing_bsp": [
+        Toma(cuadros=2),
+        Toma(sufijo="kd", teclas=["K"], cuadros=2),
+        Toma(sufijo="orden", teclas=["O"], cuadros=2),
+        Toma(sufijo="acercado", teclas=["Z"], cuadros=2),
+        Toma(sufijo="kd-acercado", teclas=["K", "Z"], cuadros=2),
+        Toma(sufijo="avanzar", teclas=["UP"], cuadros=60),
+    ],
     "raytracing_2d": [
         Toma(cuadros=2),
         # 32 pixeles, 3 rebotes y solo el pixel 13, que rebota entre la esfera roja y la verde

@@ -32,7 +32,8 @@ def cargar_mapa(ruta, nombre="E1M1"):
       una de dos lados separa dos sectores y se ve a través de ella.
     - especial (L,): el número de la acción de cada línea, o 0 si no tiene; la
       1, por ejemplo, abre la puerta que está detrás de la línea.
-    - piso, techo y luz (S,) de cada sector, y cielo (S,), si su techo es el cielo.
+    - piso, techo y luz (S,) de cada sector, con la luz de 0 a 255, y cielo (S,),
+      si su techo es el cielo.
     - jugador: posición (x, y) y ángulo en radianes.
     """
     datos = Path(ruta).read_bytes()
@@ -66,7 +67,7 @@ def cargar_mapa(ruta, nombre="E1M1"):
         "especial": np.array([linea[3] for linea in lineas]),
         "piso": np.array([s[0] for s in sectores], dtype=np.float64),
         "techo": np.array([s[1] for s in sectores], dtype=np.float64),
-        "luz": np.array([s[4] for s in sectores], dtype=np.float64) / 255.0,
+        "luz": np.array([s[4] for s in sectores]),
         "cielo": np.array([s[3].rstrip(b"\0") == b"F_SKY1" for s in sectores]),
         "jugador": (np.array(jugador[:2], dtype=np.float64), np.radians(jugador[2])),
     }

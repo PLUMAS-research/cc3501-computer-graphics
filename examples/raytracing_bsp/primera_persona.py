@@ -26,9 +26,18 @@ COLOR_TECHO = np.array([0.33, 0.33, 0.36])
 COLOR_CIELO = np.array([0.50, 0.58, 0.72])
 
 
-def _luz(mapa, sector, distancia):
-    """La luz del sector, que se apaga con la distancia como en Doom."""
-    return mapa["luz"][sector] * np.minimum(np.maximum(1.25 - distancia / 1600.0, 0.3), 1.0)
+def _luz(mapa, sector, aclarado, contraste=0):
+    """La fracción de su color con que se ve una superficie, con las tablas de luz de Doom.
+
+    Doom oscurece los colores con 32 tablas (COLORMAP), de la más clara a la más
+    oscura, y la tabla n deja (32 - n) / 32 del color. La luz del sector, de 0 a
+    255, elige la tabla de lo que está lejos: con luz 255 es la 0, y cada 16
+    unidades menos la oscurecen en cuatro tablas. Lo que está cerca se aclara en
+    `aclarado` tablas, y `contraste` suma o resta 16 unidades de luz (zlight y
+    scalelight, en r_main.c).
+    """
+    nivel = min(max(mapa["luz"][sector] // 16 + contraste, 0), 15)
+    return (32 - np.minimum(np.maximum(4 * (15 - nivel) - aclarado, 0), 31)) / 32
 
 
 def _plano(planos, mapa, sector, cual, ojo, focal, alto):
@@ -44,8 +53,13 @@ def _plano(planos, mapa, sector, cual, ojo, focal, alto):
     if (sector, cual) not in planos:
         filas = np.arange(alto) + 0.5
         distancia = (mapa[cual][sector] - ojo) * focal / (alto / 2.0 - filas)
+        # Doom lee la tabla con la distancia en tramos de 16 unidades, hasta 127
+        # (zlight): cada fila se aclara como una pared a 16 * (tramos + 1)
+        # unidades, sin el tope de las paredes
+        tramos = np.minimum(np.maximum(distancia // 16, 0), 127)
+        aclarado = (focal / (tramos + 1)).astype(int) // 2
         color = COLOR_PISO if cual == "piso" else COLOR_TECHO
-        planos[sector, cual] = color * _luz(mapa, sector, distancia)[:, None, None]
+        planos[sector, cual] = color * _luz(mapa, sector, aclarado)[:, None, None]
     return planos[sector, cual]
 
 
@@ -93,10 +107,12 @@ def _columna(columna, mapa, arbol, cruces, posicion, coseno, ojo, focal, planos)
         cerca, lejos = _lados(mapa, arbol, pared, posicion)
         if cerca < 0:
             cerca, lejos = lejos, -1
-        luz = _luz(mapa, cerca, distancia)
         a, b = arbol["a"][pared], arbol["b"][pared]
         # contraste falso de Doom: las paredes este-oeste más oscuras, las norte-sur más claras
-        contraste = 0.9 if abs(a[1] - b[1]) < 1e-6 else 1.1 if abs(a[0] - b[0]) < 1e-6 else 1.0
+        contraste = -1 if abs(a[1] - b[1]) < 1e-6 else 1 if abs(a[0] - b[0]) < 1e-6 else 0
+        # Doom lee la tabla con la escala en dieciseisavos, hasta 47, y aclara
+        # una tabla por cada dos (scalelight)
+        luz = _luz(mapa, cerca, min(int(16 * escala), 47) // 2, contraste)
 
         # techo y piso del sector cercano, desde el borde de la ventana hasta esta pared
         techo = _fila(mapa["techo"][cerca], ojo, escala, horizonte, arriba, abajo)
@@ -108,16 +124,16 @@ def _columna(columna, mapa, arbol, cruces, posicion, coseno, ojo, focal, planos)
         columna[piso:abajo] = _plano(planos, mapa, cerca, "piso", ojo, focal, len(columna))[piso:abajo]
         arriba, abajo = techo, piso
         if lejos < 0:
-            columna[arriba:abajo] = np.clip(COLOR_PARED * luz * contraste, 0, 1)
+            columna[arriba:abajo] = COLOR_PARED * luz
             return
         # dintel y escalón: lo que cambia entre un sector y el siguiente
         if mapa["techo"][lejos] < mapa["techo"][cerca] and not (mapa["cielo"][cerca] and mapa["cielo"][lejos]):
             dintel = _fila(mapa["techo"][lejos], ojo, escala, horizonte, arriba, abajo)
-            columna[arriba:dintel] = np.clip(COLOR_DINTEL * luz * contraste, 0, 1)
+            columna[arriba:dintel] = COLOR_DINTEL * luz
             arriba = dintel
         if mapa["piso"][lejos] > mapa["piso"][cerca]:
             escalon = _fila(mapa["piso"][lejos], ojo, escala, horizonte, arriba, abajo)
-            columna[escalon:abajo] = np.clip(COLOR_ESCALON * luz * contraste, 0, 1)
+            columna[escalon:abajo] = COLOR_ESCALON * luz
             abajo = escalon
         if arriba >= abajo:
             return

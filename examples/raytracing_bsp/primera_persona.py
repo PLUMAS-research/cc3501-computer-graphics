@@ -146,8 +146,9 @@ def sector_en(mapa, arbol, solida, posicion):
 
 
 def puede_avanzar(mapa, arbol, solida, posicion, desplazamiento):
-    """Si el jugador puede moverse en línea recta: no cruza paredes sólidas, ni
-    escalones de más de 24 unidades, ni pasos de menos de 56 de alto."""
+    """Si el jugador puede moverse en línea recta: no cruza paredes sólidas ni
+    líneas marcadas como infranqueables, ni escalones de más de 24 unidades, ni
+    pasos de menos de 56 de alto."""
     largo = np.linalg.norm(desplazamiento)
     if largo == 0:
         return True
@@ -156,7 +157,7 @@ def puede_avanzar(mapa, arbol, solida, posicion, desplazamiento):
         if t > largo + RADIO_JUGADOR:
             return True
         cerca, lejos = _lados(mapa, arbol, pared, posicion)
-        if cerca < 0 or lejos < 0:
+        if cerca < 0 or lejos < 0 or mapa["bloquea"][arbol["linea"][pared]]:
             return False
         hueco = min(mapa["techo"][cerca], mapa["techo"][lejos]) - max(mapa["piso"][cerca], mapa["piso"][lejos])
         if mapa["piso"][lejos] - mapa["piso"][cerca] > ALTURA_PASO or hueco < ALTURA_JUGADOR:

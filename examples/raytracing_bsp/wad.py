@@ -32,6 +32,8 @@ def cargar_mapa(ruta, nombre="E1M1"):
       una de dos lados separa dos sectores y se ve a través de ella.
     - especial (L,): el número de la acción de cada línea, o 0 si no tiene; la
       1, por ejemplo, abre la puerta que está detrás de la línea.
+    - bloquea (L,): si la línea impide el paso aunque se vea a través de ella
+      (la marca ML_BLOCKING de Doom).
     - piso, techo y luz (S,) de cada sector, con la luz de 0 a 255, y cielo (S,),
       si su techo es el cielo.
     - jugador: posición (x, y) y ángulo en radianes.
@@ -65,6 +67,7 @@ def cargar_mapa(ruta, nombre="E1M1"):
         "sector_derecho": np.array([sector(linea[5]) for linea in lineas]),
         "sector_izquierdo": np.array([sector(linea[6]) for linea in lineas]),
         "especial": np.array([linea[3] for linea in lineas]),
+        "bloquea": np.array([linea[2] & 1 > 0 for linea in lineas]),
         "piso": np.array([s[0] for s in sectores], dtype=np.float64),
         "techo": np.array([s[1] for s in sectores], dtype=np.float64),
         "luz": np.array([s[4] for s in sectores]),

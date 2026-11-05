@@ -1,9 +1,12 @@
 """Carga tomografias computarizadas reales y las entrega en unidades Hounsfield.
 
-Las tomografias vienen de pyvista (se descargan una vez y quedan cacheadas en
-disco). Cada dataset guarda los valores en su propia escala; aqui se restan al
-offset que deja el aire cerca de -1000 HU y el agua cerca de 0 HU, asi la misma
-funcion de transferencia del fantoma (aire / tejido / hueso) clasifica bien.
+Hay dos origenes. cargar_ct baja una tomografia de los ejemplos de pyvista (se
+descarga una vez y queda cacheada en disco); cada dataset guarda los valores en
+su propia escala, asi que se les resta el offset que deja el aire cerca de
+-1000 HU y el agua cerca de 0 HU. cargar_nifti lee un archivo NIfTI local, el
+formato habitual de los conjuntos de datos medicos, que ya viene en HU. En los
+dos casos la misma funcion de transferencia del fantoma (aire / tejido / hueso)
+clasifica bien.
 """
 
 import numpy as np
@@ -47,3 +50,40 @@ def cargar_ct(nombre="full_head"):
     extension_mundo = np.array([extension[0], extension[2], extension[1]])  # (LR, SI, AP)
     medios_lados = (extension_mundo / extension_mundo.max()).astype(np.float32)
     return volumen, medios_lados
+
+
+def cargar_nifti(ruta, ruta_mascara=None):
+    """Lee una tomografia en formato NIfTI (.nii o .nii.gz), ya en HU.
+
+    Devuelve (volumen_hu, medios_lados, mascara, mm3_por_voxel). La mascara es
+    opcional: un volumen de etiquetas enteras del mismo tamano (0 = fondo), que se
+    devuelve como uint8. Sin mascara se devuelve None. mm3_por_voxel sirve para
+    pasar de una cantidad de voxeles a un volumen fisico.
+
+    NIfTI guarda junto a los voxeles la orientacion del paciente. Con
+    as_closest_canonical los ejes del arreglo quedan en orden RAS: i hacia la
+    derecha, j hacia adelante (anterior) y k hacia arriba (superior).
+    """
+    import nibabel
+
+    def canonico(ruta_archivo):
+        return nibabel.as_closest_canonical(nibabel.load(ruta_archivo))
+
+    imagen = canonico(ruta)
+    espaciado = np.array(imagen.header.get_zooms()[:3])  # mm por voxel en (i, j, k)
+    datos = imagen.get_fdata(dtype=np.float32)            # (LR, AP, SI)
+
+    # Mismo orden de ejes que cargar_ct: (AP, SI, LR), con la cabeza arriba.
+    volumen = np.ascontiguousarray(np.transpose(datos, (1, 2, 0)))
+
+    extension = np.array(datos.shape) * espaciado          # (LR, AP, SI)
+    extension_mundo = np.array([extension[0], extension[2], extension[1]])
+    medios_lados = (extension_mundo / extension_mundo.max()).astype(np.float32)
+
+    mascara = None
+    if ruta_mascara is not None:
+        etiquetas = np.asarray(canonico(ruta_mascara).dataobj)
+        assert etiquetas.shape == datos.shape, "la mascara no tiene el tamano del volumen"
+        assert 0 <= etiquetas.min() and etiquetas.max() < 256, "la mascara necesita etiquetas de 0 a 255"
+        mascara = np.ascontiguousarray(np.transpose(etiquetas, (1, 2, 0)).astype(np.uint8))
+    return volumen, medios_lados, mascara, float(np.prod(espaciado))

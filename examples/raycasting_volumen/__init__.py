@@ -16,17 +16,25 @@ los cortes. La cruz de cada corte marca donde cruzan los otros dos planos, y
 arrastrando dentro del corte se mueven esos planos.
 
 Por defecto el volumen es un fantoma de Shepp-Logan en HU (ver fantoma.py); la
-opcion --ct carga una tomografia real (ver ct.py), tambien en HU.
+opcion --ct carga una tomografia real (ver ct.py), tambien en HU. La opcion --nifti
+lee una tomografia local en formato NIfTI, y --mascara le agrega una segmentacion
+del mismo tamano: cada etiqueta se pinta con su color en la vista 3D y en los
+cortes, y un clic derecho en un corte informa las HU del voxel y la etiqueta.
 
 Controles:
 - vista 3D: arrastra para orbitar la camara.
 - cortes:   arrastra un borde del recorte para recortar ese eje; arrastra al
             centro para mover la cruz (los otros dos cortes); rueda para cambiar
             el corte mostrado.
+- clic derecho en un corte: HU del voxel y, con --mascara, su etiqueta y volumen.
 - M:        cicla modo de composicion 3D (MIP / promedio / compositing).
+- L:        alterna la iluminacion de Phong con el gradiente (solo compositing).
+- P:        alterna el MIP con profundidad (solo MIP).
 - I:        alterna interpolacion (vecino mas cercano / trilineal).
 - E:        alterna terminacion temprana (solo afecta al compositing).
 - , / .:    baja / sube el paso de muestreo k.
+- V:        cambia la ventana radiologica de los cortes (amplia / tejido blando).
+- H:        oculta o muestra el panel de texto.
 - R:        reinicia camara, recorte y cortes.
 - ESC:      cierra la ventana.
 """
@@ -47,7 +55,8 @@ from .fantoma import generar_fantoma
 
 MODOS = ["MIP (maximo)", "promedio", "compositing"]
 PASOS_K = [0.1, 0.25, 0.5, 1.0]
-VENTANA = (200.0, 1600.0)  # ventana radiologica de los cortes: (nivel, ancho) en HU.
+# ventanas radiologicas de los cortes: (nombre, (nivel, ancho)) en HU.
+VENTANAS = [("amplia", (200.0, 1600.0)), ("tejido blando", (40.0, 400.0))]
 
 COLOR_RECORTE = (0.95, 0.75, 0.20)  # rectangulo de la caja de recorte.
 COLOR_CRUZ = (0.30, 0.70, 0.95)     # cruz que marca los otros dos cortes.
@@ -71,6 +80,11 @@ DEFAULTS = {
     "k_index": 2,            # k = 0.5 por defecto.
     "trilineal": True,
     "terminacion": True,
+    "ventana": 0,
+    "iluminacion": False,
+    "profundidad": False,
+    "panel": True,
+    "consulta": "clic derecho en un corte",
     "yaw": 0.7,
     "pitch": 0.4,
     "clip_min": [0.0, 0.0, 0.0],
@@ -101,6 +115,36 @@ def _subir_volumen(volumen):
     return texture_id
 
 
+def _subir_mascara(mascara):
+    """Sube la mascara (etiquetas uint8) a la unidad de textura 1 y devuelve su id.
+
+    Una mascara es un volumen de etiquetas, asi que se lee siempre con GL_NEAREST:
+    interpolar entre una etiqueta y otra daria valores que no son ninguna de las dos.
+    Sin mascara se sube un solo voxel en cero, para que el sampler tenga algo que leer.
+    """
+    if mascara is None:
+        mascara = np.zeros((1, 1, 1), dtype=np.uint8)
+    profundidad, alto, ancho = mascara.shape
+
+    texture_id = GL.GLuint(0)
+    GL.glGenTextures(1, ctypes.byref(texture_id))
+    GL.glActiveTexture(GL.GL_TEXTURE1)
+    GL.glBindTexture(GL.GL_TEXTURE_3D, texture_id)
+    GL.glPixelStorei(GL.GL_UNPACK_ALIGNMENT, 1)
+    GL.glTexImage3D(
+        GL.GL_TEXTURE_3D, 0, GL.GL_R8,
+        ancho, alto, profundidad,
+        0, GL.GL_RED, GL.GL_UNSIGNED_BYTE,
+        mascara.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8)),
+    )
+    for parametro in (GL.GL_TEXTURE_MIN_FILTER, GL.GL_TEXTURE_MAG_FILTER):
+        GL.glTexParameteri(GL.GL_TEXTURE_3D, parametro, GL.GL_NEAREST)
+    for eje in (GL.GL_TEXTURE_WRAP_S, GL.GL_TEXTURE_WRAP_T, GL.GL_TEXTURE_WRAP_R):
+        GL.glTexParameteri(GL.GL_TEXTURE_3D, eje, GL.GL_CLAMP_TO_EDGE)
+    GL.glActiveTexture(GL.GL_TEXTURE0)
+    return texture_id
+
+
 def _layout(ancho, alto):
     """Cuatro cuadrantes (x, y, w, h) con origen abajo a la izquierda."""
     medio_x, medio_y = ancho // 2, alto // 2
@@ -128,13 +172,27 @@ def _quad_scale(plano, rect, box_half):
 @click.option("--resolucion", type=int, default=128, help="Lado del fantoma en voxeles.")
 @click.option("--ct", type=click.Choice(["full_head"]), default=None,
               help="Carga una tomografia real (se descarga una vez) en vez del fantoma.")
-def raycasting_volumen(width, height, resolucion, ct):
+@click.option("--nifti", type=click.Path(exists=True, dir_okay=False), default=None,
+              help="Lee una tomografia local en formato NIfTI (.nii o .nii.gz).")
+@click.option("--mascara", type=click.Path(exists=True, dir_okay=False), default=None,
+              help="Segmentacion NIfTI del mismo tamano que --nifti.")
+def raycasting_volumen(width, height, resolucion, ct, nifti, mascara):
     window = pyglet.window.Window(width, height, caption="Visor de volumen (3D + MPR)")
 
     state = copy.deepcopy(DEFAULTS)
     state["drag"] = None
 
-    if ct is not None:
+    if mascara is not None and nifti is None:
+        raise click.UsageError("--mascara necesita --nifti")
+
+    mascara_hu = None
+    mm3_por_voxel = None
+    if nifti is not None:
+        from .ct import cargar_nifti
+        volumen, box_half, mascara_hu, mm3_por_voxel = cargar_nifti(nifti, mascara)
+        nombre = Path(nifti).name
+        fuente = f"NIfTI {nombre if len(nombre) <= 28 else nombre[:25] + '...'}"
+    elif ct is not None:
         from .ct import cargar_ct
         volumen, box_half = cargar_ct(ct)
         fuente = f"CT {ct}"
@@ -150,6 +208,18 @@ def raycasting_volumen(width, height, resolucion, ct):
     voxel_size = float((2.0 * box_half / dimensiones_xyz).min())
 
     texture_id = _subir_volumen(volumen)
+    mascara_id = _subir_mascara(mascara_hu)
+
+    # volumen de cada etiqueta: cantidad de voxeles por el volumen de un voxel.
+    mililitros = {}
+    if mascara_hu is not None:
+        conteos = np.bincount(mascara_hu.ravel())
+        mililitros = {etiqueta: conteo * mm3_por_voxel / 1000.0
+                      for etiqueta, conteo in enumerate(conteos) if etiqueta > 0 and conteo > 0}
+        print(f"[raycasting_volumen] mascara con {len(mililitros)} etiquetas "
+              f"(voxel de {mm3_por_voxel:.3f} mm3):")
+        for etiqueta, ml in mililitros.items():
+            print(f"    etiqueta {etiqueta}: {conteos[etiqueta]} voxeles, {ml:.2f} mL")
 
     carpeta = Path(__file__).parent
     raycast = load_pipeline(carpeta / "vertex_program.glsl", carpeta / "fragment_program.glsl")
@@ -176,9 +246,12 @@ def raycasting_volumen(width, height, resolucion, ct):
     raycast["voxel_size"] = voxel_size
     raycast["box_half"] = tuple(float(v) for v in box_half)
     raycast["volume"] = 0
+    raycast["mascara"] = 1
+    raycast["usar_mascara"] = int(mascara_hu is not None)
     slice_pipe.use()
     slice_pipe["volume"] = 0
-    slice_pipe["window_level"] = VENTANA
+    slice_pipe["mascara"] = 1
+    slice_pipe["usar_mascara"] = int(mascara_hu is not None)
 
     layout = _layout(width, height)
 
@@ -190,9 +263,15 @@ def raycasting_volumen(width, height, resolucion, ct):
         .add("interpolacion")
         .add("paso")
         .add("terminacion")
+        .add("ventana")
+        .add("iluminacion")
         .add("recorte")
-        .footer("3D arrastra orbita   panel arrastra recorta, rueda cambia corte   M I E , . R reset")
+        .add("consulta")
+        .footer("3D arrastra orbita   panel arrastra recorta, rueda cambia corte, "
+                "clic derecho consulta   M I E , . V L P H R")
     )
+    if mililitros:
+        panel.add("segmentacion")
 
     def apply_state():
         """Propaga el estado a los uniforms del ray casting, al filtro y al panel."""
@@ -203,6 +282,8 @@ def raycasting_volumen(width, height, resolucion, ct):
         raycast["early_termination"] = 1 if state["terminacion"] else 0
         raycast["clip_min"] = tuple(state["clip_min"])
         raycast["clip_max"] = tuple(state["clip_max"])
+        raycast["iluminacion"] = int(state["iluminacion"])
+        raycast["profundidad_mip"] = int(state["profundidad"])
 
         k = PASOS_K[state["k_index"]]
         raycast["step_size"] = k * voxel_size
@@ -213,7 +294,11 @@ def raycasting_volumen(width, height, resolucion, ct):
         GL.glTexParameteri(GL.GL_TEXTURE_3D, GL.GL_TEXTURE_MIN_FILTER, filtro)
         GL.glTexParameteri(GL.GL_TEXTURE_3D, GL.GL_TEXTURE_MAG_FILTER, filtro)
 
-        modo = MODOS[state["modo"]]
+        nombre_ventana, (nivel, ancho) = VENTANAS[state["ventana"]]
+        slice_pipe.use()
+        slice_pipe["window_level"] = (nivel, ancho)
+
+        modo = MODOS[state["modo"]] + (" con profundidad" if state["modo"] == 0 and state["profundidad"] else "")
         interpolacion = "trilineal" if state["trilineal"] else "vecino mas cercano"
         activa_terminacion = state["modo"] == 2 and state["terminacion"]
         cmin, cmax = state["clip_min"], state["clip_max"]
@@ -224,6 +309,13 @@ def raycasting_volumen(width, height, resolucion, ct):
         panel["terminacion"] = (
             f"terminacion temprana: {'activa' if activa_terminacion else 'inactiva'}"
         )
+        panel["ventana"] = f"ventana de los cortes: {nombre_ventana} (nivel {nivel:.0f}, ancho {ancho:.0f})"
+        panel["iluminacion"] = (f"iluminacion de Phong: {'activa' if state['iluminacion'] else 'inactiva'}"
+                                + ("" if state["modo"] == 2 else " (solo compositing)"))
+        panel["consulta"] = f"consulta: {state['consulta']}"
+        if mililitros:
+            panel["segmentacion"] = (f"segmentacion: {len(mililitros)} etiquetas, de "
+                                     f"{min(mililitros.values()):.2f} a {max(mililitros.values()):.2f} mL")
         panel["recorte"] = (
             f"recorte x[{cmin[0]:.2f},{cmax[0]:.2f}] "
             f"y[{cmin[1]:.2f},{cmax[1]:.2f}] z[{cmin[2]:.2f},{cmax[2]:.2f}]"
@@ -265,9 +357,35 @@ def raycasting_volumen(width, height, resolucion, ct):
         ndc_y = ((y - ry) / rh) * 2 - 1
         return (ndc_x / escala_x + 1) / 2, (ndc_y / escala_y + 1) / 2
 
+    def _consultar(p, uv_x, uv_y):
+        """Lee en la CPU el voxel bajo el cursor: el camino inverso del corte.
+
+        El corte muestra la textura en el plano donde la coordenada del eje
+        `fuera` vale slice_pos; los otros dos ejes son (uv.x, uv.y). Con esa
+        coordenada en [0,1] se obtiene el indice del voxel en el arreglo de numpy,
+        que tiene los ejes al reves que la textura: (z, y, x).
+        """
+        coordenada = [0.0, 0.0, 0.0]
+        eje_a, eje_b = p["plano"]
+        coordenada[eje_a], coordenada[eje_b] = uv_x, uv_y
+        coordenada[p["fuera"]] = state["slice"][p["fuera"]]
+        tamano = volumen.shape[::-1]  # (ancho, alto, profundidad) = ejes (x, y, z)
+        i, j, k = (int(np.clip(c * n, 0, n - 1)) for c, n in zip(coordenada, tamano))
+        texto = f"voxel ({i}, {j}, {k}) en {p['nombre']}: {volumen[k, j, i]:.0f} HU"
+        if mascara_hu is not None:
+            etiqueta = int(mascara_hu[k, j, i])
+            texto += (f", etiqueta {etiqueta} ({mililitros[etiqueta]:.2f} mL)" if etiqueta
+                      else ", fuera de la segmentacion")
+        state["consulta"] = texto
+        print(f"[raycasting_volumen] {texto}")
+        apply_state()
+
     @window.event
     def on_draw():
         window.clear()
+
+        GL.glActiveTexture(GL.GL_TEXTURE1)
+        GL.glBindTexture(GL.GL_TEXTURE_3D, mascara_id)
 
         rx, ry, rw, rh = layout["3d"]
         GL.glViewport(rx, ry, rw, rh)
@@ -300,7 +418,8 @@ def raycasting_volumen(width, height, resolucion, ct):
             lineas_recorte[p["nombre"]].draw(GL.GL_LINES)
 
         GL.glViewport(0, 0, window.width, window.height)
-        panel.draw()
+        if state["panel"]:
+            panel.draw()
 
     @window.event
     def on_mouse_press(x, y, button, modifiers):
@@ -314,6 +433,11 @@ def raycasting_volumen(width, height, resolucion, ct):
 
         uv_x, uv_y = _mouse_a_uv(objetivo, x, y)
         if not (-0.05 <= uv_x <= 1.05 and -0.05 <= uv_y <= 1.05):
+            state["drag"] = None
+            return
+
+        if button == pyglet.window.mouse.RIGHT:
+            _consultar(objetivo, uv_x, uv_y)
             state["drag"] = None
             return
 
@@ -385,6 +509,14 @@ def raycasting_volumen(width, height, resolucion, ct):
             state["k_index"] = max(0, state["k_index"] - 1)
         elif symbol == key.PERIOD:
             state["k_index"] = min(len(PASOS_K) - 1, state["k_index"] + 1)
+        elif symbol == key.V:
+            state["ventana"] = (state["ventana"] + 1) % len(VENTANAS)
+        elif symbol == key.L:
+            state["iluminacion"] = not state["iluminacion"]
+        elif symbol == key.P:
+            state["profundidad"] = not state["profundidad"]
+        elif symbol == key.H:
+            state["panel"] = not state["panel"]
         elif symbol == key.R:
             drag = state["drag"]
             state.update(copy.deepcopy(DEFAULTS))

@@ -9,6 +9,7 @@ dependencies = [
     "matplotlib>=3.10.8",
     "mesa>=3.3.1",
     "networkx>=3.6.1",
+    "nibabel>=5.4.2",
     "numpy<2.4.0",
     "pyglet==2.1.16",
     "pymunk>=7.2.0",
@@ -16,6 +17,7 @@ dependencies = [
     "pyvista>=0.47.1",
     "rtree>=1.4.1",
     "sympy>=1.14.0",
+    "tifffile>=2026.3.3",
     "trimesh>=4.11.3",
 ]
 

@@ -22,6 +22,14 @@ uniform float slice_pos;       // posicion del corte en el eje fijo, en [0,1].
 uniform vec2 window_level;     // (nivel, ancho) de la ventana en HU.
 uniform vec3 clip_min;
 uniform vec3 clip_max;
+uniform sampler3D mascara;     // segmentacion: la etiqueta de cada voxel (0 = fondo), en R8.
+uniform int usar_mascara;      // 1 si se cargo una segmentacion.
+
+// La misma paleta de fragment_program.glsl, un color por etiqueta.
+const vec3 PALETA[8] = vec3[8](
+    vec3(1.00, 0.80, 0.10), vec3(0.20, 0.85, 1.00), vec3(0.55, 1.00, 0.35),
+    vec3(1.00, 0.45, 0.85), vec3(1.00, 0.55, 0.15), vec3(0.65, 0.55, 1.00),
+    vec3(0.95, 1.00, 0.55), vec3(0.35, 1.00, 0.80));
 
 void main() {
     vec3 coordenada;
@@ -40,6 +48,10 @@ void main() {
                && all(lessThanEqual(coordenada, clip_max));
 
     vec3 color = vec3(gris);
+    float etiqueta = usar_mascara == 1 ? round(texture(mascara, coordenada).r * 255.0) : 0.0;
+    if (etiqueta > 0.0) {
+        color = mix(color, PALETA[int(mod(etiqueta - 1.0, 8.0))], 0.6);
+    }
     if (!dentro) {
         color *= 0.35;  // atenua lo que el recorte deja fuera.
     }

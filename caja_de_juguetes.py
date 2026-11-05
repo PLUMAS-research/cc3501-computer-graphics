@@ -221,8 +221,9 @@ registrar("Unidad 19. Trazado de rayos", raytracing_2d, raytracing_basico, raytr
 
 from examples.pyvista_orbital import orbital
 from examples.raycasting_volumen import raycasting_volumen
+from examples.microscopia_volumen import microscopia_volumen
 
-registrar("Unidad 20. Rendering de volumen", orbital, raycasting_volumen)
+registrar("Unidad 20. Rendering de volumen", orbital, raycasting_volumen, microscopia_volumen)
 
 from examples.animacion_esqueletica import animacion_esqueletica
 from examples.esqueleto_lbs import esqueleto_lbs

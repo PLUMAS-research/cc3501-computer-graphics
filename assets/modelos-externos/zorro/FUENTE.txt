@@ -1,0 +1,3 @@
+Fox, de los modelos de muestra de Khronos (glTF-Sample-Assets).
+Fuente: https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/Fox
+Modelo de PixelMannen (CC0); rig y animaciones de tomkranis (CC-BY 4.0). Ver LICENSE.md.

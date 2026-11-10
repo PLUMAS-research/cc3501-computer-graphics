@@ -226,12 +226,14 @@ from examples.microscopia_volumen import microscopia_volumen
 registrar("Unidad 20. Rendering de volumen", orbital, raycasting_volumen, microscopia_volumen)
 
 from examples.animacion_esqueletica import animacion_esqueletica
+from examples.cinematica_inversa import cinematica_inversa
 from examples.esqueleto_lbs import esqueleto_lbs
 from examples.skinning import skinning
 
 registrar(
     "Unidad 21. Animación y esqueletos",
     esqueleto_lbs,
+    cinematica_inversa,
     animacion_esqueletica,
     skinning,
 )

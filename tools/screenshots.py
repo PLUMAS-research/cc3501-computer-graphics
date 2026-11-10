@@ -100,8 +100,25 @@ RECETAS = {
         Toma(sufijo="doblado", teclas=["Z"] * 8 + ["X"] * 6, cuadros=2),
         Toma(sufijo="wireframe", teclas=["W"] + ["Z"] * 8 + ["X"] * 6, cuadros=2),
         Toma(sufijo="colision", teclas=["C"] + ["Z"] * 8 + ["X"] * 6, cuadros=2),
+        # el hueso 1 girado 180 grados en torno a su eje: LBS cierra el tubo y DQS no
+        Toma(sufijo="torsion-lbs", teclas=["F"] * 12, cuadros=2),
+        Toma(sufijo="torsion-dqs", teclas=["F"] * 12 + ["M"], cuadros=2),
     ],
-    "animacion_esqueletica": [Toma(teclas=["PERIOD"] * 8, cuadros=2)],  # avanza la animacion
+    # cinematica inversa: resuelta, y una sola iteracion de cada metodo desde la
+    # cadena recta (la pose anterior queda en gris)
+    "cinematica_inversa": [
+        Toma(cuadros=2),
+        Toma(sufijo="paso-ccd", teclas=["SPACE", "R", "N"], cuadros=2),
+        Toma(sufijo="paso-fabrik", teclas=["SPACE", "M", "N"], cuadros=2),
+    ],
+    "animacion_esqueletica": [
+        Toma(teclas=["PERIOD"] * 8, cuadros=2),  # avanza la animacion
+        # de avion a GERWALK: la animacion dura 13,4 s y el reloj avanza 1/60 s por cuadro
+        Toma(sufijo="t00", cuadros=0),
+        Toma(sufijo="t06", cuadros=360),
+        Toma(sufijo="t10", cuadros=600),
+        Toma(sufijo="t13", cuadros=798),
+    ],
     # transformaciones: el espirografo necesita acumular traza, y el conejo
     # muestra el efecto de la coordenada w encendido y apagado
     "spirograph": [Toma(cuadros=2700)],  # r/R = 0.35 cierra la curva a las 7 vueltas

@@ -361,8 +361,13 @@ class GltfModel:
                 "duration": max((c.times[-1] for c in channels if len(c.times) > 0), default=0.0),
             })
 
-    def upload_textures(self):
-        """Sube las imagenes a GPU como texturas 2D. Llamar con contexto OpenGL activo."""
+    def upload_textures(self, flip_top_bottom=True):
+        """Sube las imagenes a GPU como texturas 2D. Llamar con contexto OpenGL activo.
+
+        flip_top_bottom=False corresponde a los archivos que siguen la especificacion,
+        como los que exporta Blender; True, a los que traen las UV al reves, como el
+        Macross de Sketchfab. Ver la convencion de flip en CLAUDE.md.
+        """
         gltf = self._gltf
         base_dir = self._base_dir
         image_texture_ids = {}
@@ -384,7 +389,7 @@ class GltfModel:
             pil_image = Image.open(image_path)
             if pil_image.mode not in ("RGB", "RGBA"):
                 pil_image = pil_image.convert("RGBA")
-            texture_id = texture_2D_setup(pil_image)
+            texture_id = texture_2D_setup(pil_image, flip_top_bottom=flip_top_bottom)
             image_texture_ids[image_index] = texture_id
             self.texture_gl_ids.append(texture_id)
 

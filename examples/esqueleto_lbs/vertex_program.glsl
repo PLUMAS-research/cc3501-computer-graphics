@@ -11,12 +11,15 @@
 //
 // El color del vertice tambien se mezcla con los pesos, usando un color por
 // hueso (joint_colors). Asi se ve directamente que hueso domina cada region
-// de la malla y como las bandas de mezcla se deforman con el esqueleto.
+// de la malla y como las bandas de mezcla se deforman con el esqueleto. Las
+// franjas oscuras a lo largo del tubo dejan ver cuando un hueso gira en torno
+// a su propio eje, que en un tubo sin marcas no se notaria.
 
 in vec3 position;
 in vec3 normal;
 in vec4 joints;
 in vec4 weights;
+in float franja;   // 1 en las franjas oscuras, 0 en el resto
 
 uniform mat4 view;
 uniform mat4 projection;
@@ -46,6 +49,7 @@ void main()
         + weights.y * joint_colors[int(joints.y)]
         + weights.z * joint_colors[int(joints.z)]
         + weights.w * joint_colors[int(joints.w)];
+    weight_color *= mix(1.0, 0.55, franja);
 
     gl_Position = projection * view * skinned_position;
 }

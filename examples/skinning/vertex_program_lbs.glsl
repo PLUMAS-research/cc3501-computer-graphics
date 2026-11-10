@@ -18,7 +18,9 @@ in vec4 weights;
 uniform mat4 transform;
 uniform mat4 view;
 uniform mat4 projection;
-uniform mat4 skin_matrices[91];
+// NUM_JOINTS lo define skinning al compilar: es la cantidad de huesos
+// del modelo, porque el largo de un arreglo uniform tiene que ser constante
+uniform mat4 skin_matrices[NUM_JOINTS];
 
 out vec3 world_position;
 out vec3 world_normal;

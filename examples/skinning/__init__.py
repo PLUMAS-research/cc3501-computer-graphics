@@ -10,20 +10,45 @@ LBS mezcla esas matrices linealmente: rapido pero degenera bajo torsion
 esfera de cuaterniones y renormaliza: mantiene volumen mejor pero cuesta
 mas.
 
-El modelo (un zorzal con animacion de aleteo) tiene un quirk de export:
-el archivo tiene dos esqueletos identicos en nombre y la animacion mueve
-el segundo, pero la malla esta vinculada al primero. El ejemplo construye
-un mapeo por nombre desde los nodos animados al esqueleto efectivo.
+El modelo por omision (un zorzal con animacion de aleteo) tiene un quirk de export:
+el archivo tiene dos esqueletos con los mismos nombres y la animacion mueve
+el segundo, pero la malla esta vinculada al primero. Cada joint de la malla toma
+la pose global del nodo de igual nombre que mueve la animacion.
 
 Teclas:
     m             alterna LBS / DQS
     e             muestra / oculta el esqueleto (lineas entre huesos)
+    a             pasa a la animacion siguiente, si el archivo trae varias
     espacio       pausa / reanuda
     , y .         retrocede / avanza 0.05 s
     r             reset a t = 0
     mouse izq     rotar camara
     mouse der     pan
     rueda         zoom
+
+Otros modelos:
+    uv run python caja_de_juguetes.py skinning ruta/al/modelo.gltf --animacion 2
+
+    El archivo tiene que ser un .gltf con su .bin aparte, con un esqueleto
+    (skin) y a lo mas cuatro huesos por vertice. Un .glb, un .fbx o un .blend
+    se convierten con Blender usando tools/convertir_a_gltf.py, que ademas junta
+    en un solo archivo las animaciones que vienen en archivos separados. El
+    ejemplo dibuja solo las mallas con skin, usa el primer skin que encuentra y
+    asume el eje Y hacia arriba. El largo de los arreglos de huesos de los
+    shaders se fija al compilarlos, con la cantidad de huesos del modelo.
+
+    Modelos probados con este ejemplo:
+    - Fox, de los modelos de muestra de Khronos (modelo CC0; rig y animaciones
+      CC-BY 4.0). Se carga tal cual, con 24 huesos y tres animaciones:
+      github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/Fox/glTF
+    - Animated Human, de Quaternius (CC0 en poly.pizza/m/c3Ibh9I3udk). Viene
+      en .glb, con 41 huesos y ocho animaciones.
+    - Low poly pigeon, de mujtaba-io (CC0 en opengameart.org/content/
+      low-poly-3d-pigeon-model-rigged-animated-untextured). Viene en .blend,
+      con 13 huesos y tres animaciones.
+    - Animated Characters 1, de Kenney (CC0 en kenney.nl/assets/
+      animated-characters-1). El modelo y cada animacion vienen en un .fbx
+      aparte, y las texturas, en una carpeta que hay que conectar en Blender.
 """
 
 from pathlib import Path
@@ -44,6 +69,8 @@ from grafica.textures import texture_2D_setup
 from grafica.ui import ui_overlay
 from grafica.utils import load_pipeline
 
+from examples.esqueleto_lbs.cuaterniones_duales import skin_matrix_to_dual_quaternion
+
 
 DEFAULT_GLTF = "assets/zorzal-aleteo.gltf"
 
@@ -59,117 +86,52 @@ ZORZAL_MATERIAL_TEXTURE_MAP = {
 }
 
 
-def matrix_to_quaternion(rotation_matrix_3x3):
+def animated_joint_nodes(model, animation_index):
     """
-    Convierte una matriz 3x3 de rotacion (ortonormal, det = 1) a un
-    cuaternion en formato xyzw. Es la formula clasica basada en la traza
-    con casos para evitar perdida de precision cuando el coeficiente
-    dominante es chico.
+    Para cada joint del skin de la malla, el nodo cuya pose global usa el skinning.
+
+    El zorzal viene con dos esqueletos con los mismos nombres: la malla esta
+    pegada al primero y el aleteo mueve el segundo. Copiar las transformaciones
+    locales del segundo al primero no basta, porque la raiz del segundo se llama
+    distinto (blackbird_Pelvis_bone.001) y su movimiento se pierde: el cuerpo
+    quedaba sin la inclinacion de 13 grados y sin el sube y baja del aleteo. Por
+    eso cada joint toma la pose global del nodo de igual nombre que mueve la
+    animacion. Si la animacion mueve los joints del skin, cada joint es su propio
+    nodo.
     """
-    m = rotation_matrix_3x3
-    trace = m[0, 0] + m[1, 1] + m[2, 2]
-    if trace > 0.0:
-        s = 2.0 * np.sqrt(trace + 1.0)
-        qw = 0.25 * s
-        qx = (m[2, 1] - m[1, 2]) / s
-        qy = (m[0, 2] - m[2, 0]) / s
-        qz = (m[1, 0] - m[0, 1]) / s
-    elif m[0, 0] > m[1, 1] and m[0, 0] > m[2, 2]:
-        s = 2.0 * np.sqrt(1.0 + m[0, 0] - m[1, 1] - m[2, 2])
-        qw = (m[2, 1] - m[1, 2]) / s
-        qx = 0.25 * s
-        qy = (m[0, 1] + m[1, 0]) / s
-        qz = (m[0, 2] + m[2, 0]) / s
-    elif m[1, 1] > m[2, 2]:
-        s = 2.0 * np.sqrt(1.0 + m[1, 1] - m[0, 0] - m[2, 2])
-        qw = (m[0, 2] - m[2, 0]) / s
-        qx = (m[0, 1] + m[1, 0]) / s
-        qy = 0.25 * s
-        qz = (m[1, 2] + m[2, 1]) / s
-    else:
-        s = 2.0 * np.sqrt(1.0 + m[2, 2] - m[0, 0] - m[1, 1])
-        qw = (m[1, 0] - m[0, 1]) / s
-        qx = (m[0, 2] + m[2, 0]) / s
-        qy = (m[1, 2] + m[2, 1]) / s
-        qz = 0.25 * s
-    return np.array([qx, qy, qz, qw], dtype=np.float32)
+    mesh_skin = next(model.skins[n.skin_index] for n in model.nodes if n.skin_index is not None)
+    if animation_index is None or not model.animations:
+        return list(mesh_skin.joints)
+    animated = {channel.node_index for channel in model.animations[animation_index]["channels"]}
+    by_name = {model.nodes[index].name: index for index in animated}
+    return [j if j in animated else by_name.get(model.nodes[j].name, j) for j in mesh_skin.joints]
 
 
-def skin_matrix_to_dual_quaternion(skin_matrix):
+def load_skinning_pipeline(vertex_path, fragment_path, n_joints):
     """
-    Descompone una matriz de skinning en un dual quaternion (parte real,
-    parte dual). Asume que la parte 3x3 es una rotacion pura (sin escala
-    ni shear). Si hay escala uniforme la extrae primero; DQS clasico no
-    maneja escala asi que el resultado sera fiel solo para transformaciones
-    rigidas.
-
-    Devuelve (real_xyzw, dual_xyzw).
+    Como load_pipeline(), pero define NUM_JOINTS en el vertex program antes de
+    compilarlo. GLSL exige que el largo de un arreglo uniform sea una constante,
+    asi que se fija aqui, con la cantidad de huesos del modelo cargado.
     """
-    rotation_part = skin_matrix[:3, :3]
-    translation = skin_matrix[:3, 3]
-
-    # extraemos escala uniforme si existe. Sin este paso, matrices con escala
-    # rompen la formula de cuaternion (la traza ya no esta en el rango valido)
-    column_scales = np.linalg.norm(rotation_part, axis=0)
-    uniform_scale = float(np.mean(column_scales))
-    if uniform_scale > 1e-8:
-        rotation_normalized = rotation_part / uniform_scale
-    else:
-        rotation_normalized = rotation_part
-
-    real_quat = matrix_to_quaternion(rotation_normalized)
-
-    # dual = 0.5 * (0, t) * real_quat, con t = translation
-    # (0, t) * (qw, qx, qy, qz) en formato xyzw:
-    # resultado.w = -t . q_xyz
-    # resultado.xyz = qw * t + cross(t, q_xyz)
-    q_xyz = real_quat[:3]
-    q_w = real_quat[3]
-    dual_w = -float(np.dot(translation, q_xyz))
-    dual_xyz = q_w * translation + np.cross(translation, q_xyz)
-    dual_quat = 0.5 * np.array([dual_xyz[0], dual_xyz[1], dual_xyz[2], dual_w], dtype=np.float32)
-
-    return real_quat, dual_quat
+    vertex_source = Path(vertex_path).read_text()
+    assert vertex_source.startswith("#version 330"), vertex_path
+    vertex_source = vertex_source.replace(
+        "#version 330", f"#version 330\n#define NUM_JOINTS {n_joints}", 1
+    )
+    fragment_source = Path(fragment_path).read_text()
+    return pyglet.graphics.shader.ShaderProgram(
+        pyglet.graphics.shader.Shader(vertex_source, "vertex"),
+        pyglet.graphics.shader.Shader(fragment_source, "fragment"),
+    )
 
 
-def build_animation_remap(model):
-    """
-    El zorzal viene con dos esqueletos identicos en nombre. La animacion
-    mueve los huesos del segundo pero la malla referencia los del primero.
-    Construimos un mapeo por nombre desde nodos animados a los joints
-    del skin que efectivamente usa la malla.
-
-    Si los nodos animados ya estan en el skin de la malla, el mapeo es
-    identidad y no perturba nada.
-    """
-    mesh_skin = None
-    for node in model.nodes:
-        if node.skin_index is not None:
-            mesh_skin = model.skins[node.skin_index]
-            break
-    if mesh_skin is None:
-        return {}
-
-    target_joints = set(mesh_skin.joints)
-    name_to_target = {model.nodes[idx].name: idx for idx in mesh_skin.joints}
-
-    remap = {}
-    if model.animations:
-        for channel in model.animations[0]["channels"]:
-            src_index = channel.node_index
-            if src_index in target_joints:
-                continue
-            src_name = model.nodes[src_index].name
-            if src_name in name_to_target:
-                remap[src_index] = name_to_target[src_name]
-    return remap
-
-
-def compute_skin_matrices(model, graph, node_to_scenegraph_name):
+def compute_skin_matrices(model, graph, node_to_scenegraph_name, joint_nodes=None):
     """
     Devuelve (skin_matrices, real_quats, dual_quats) listos para subir a
     los shaders. skin_matrices: array (N, 4, 4) row-major; real_quats y
-    dual_quats: arrays (N, 4) en xyzw.
+    dual_quats: arrays (N, 4) en xyzw. joint_nodes es, para cada joint, el
+    nodo cuya pose global se usa (ver animated_joint_nodes); por omision, el
+    propio joint.
     """
     graph.calculate_global_transforms()
     mesh_skin = None
@@ -184,7 +146,9 @@ def compute_skin_matrices(model, graph, node_to_scenegraph_name):
     real_quats = np.empty((n_joints, 4), dtype=np.float32)
     dual_quats = np.empty((n_joints, 4), dtype=np.float32)
 
-    for joint_index, joint_node_index in enumerate(mesh_skin.joints):
+    if joint_nodes is None:
+        joint_nodes = mesh_skin.joints
+    for joint_index, joint_node_index in enumerate(joint_nodes):
         joint_global = graph.global_transforms[node_to_scenegraph_name[joint_node_index]]
         skin_matrix = joint_global @ mesh_skin.inverse_bind_matrices[joint_index]
         skin_matrices[joint_index] = skin_matrix
@@ -269,7 +233,9 @@ def gather_skinned_primitives(model):
 @click.argument("gltf_path", type=click.Path(exists=True, dir_okay=False), required=False)
 @click.option("--width", type=int, default=1280)
 @click.option("--height", type=int, default=800)
-def skinning(gltf_path, width, height):
+@click.option("--animacion", "animation_index", type=int, default=0,
+              help="indice de la animacion inicial; la tecla a pasa a la siguiente")
+def skinning(gltf_path, width, height, animation_index):
     if gltf_path is None:
         gltf_path = str(Path(__file__).parent.parent.parent / DEFAULT_GLTF)
 
@@ -287,23 +253,21 @@ def skinning(gltf_path, width, height):
     if mesh_skin_index is None:
         raise click.ClickException("el modelo no tiene primitivas con skinning")
     n_joints = len(model.skins[mesh_skin_index].joints)
-    SHADER_JOINTS = 91
-    if n_joints != SHADER_JOINTS:
-        raise click.ClickException(
-            f"el modelo tiene {n_joints} joints pero los shaders esperan {SHADER_JOINTS}. "
-            "Edita el tamaño de los arrays uniformes en los .glsl si quieres usar otro modelo."
-        )
     print(f"[skinning] nodos={len(model.nodes)} skins={len(model.skins)} joints_efectivos={n_joints}")
-    if model.animations:
+    for index, animation in enumerate(model.animations):
         print(
-            f"[skinning] animacion='{model.animations[0]['name']}' "
-            f"duracion={model.animations[0]['duration']:.2f}s "
-            f"canales={len(model.animations[0]['channels'])}"
+            f"[skinning] animacion {index}: '{animation['name']}' "
+            f"duracion={animation['duration']:.2f}s canales={len(animation['channels'])}"
+        )
+    if model.animations and not 0 <= animation_index < len(model.animations):
+        raise click.ClickException(
+            f"--animacion {animation_index} no existe: el archivo trae {len(model.animations)}"
         )
 
-    animation_remap = build_animation_remap(model)
-    if animation_remap:
-        print(f"[skinning] mapeo de nodos animados al esqueleto efectivo: {len(animation_remap)} entradas")
+    joint_nodes = animated_joint_nodes(model, animation_index if model.animations else None)
+    otros = sum(1 for j, n in zip(model.skins[mesh_skin_index].joints, joint_nodes) if j != n)
+    if otros:
+        print(f"[skinning] {otros} joints toman la pose de otro esqueleto animado con los mismos nombres")
 
     window = pyglet.window.Window(width=width, height=height, caption="skinning: LBS vs DQS")
     GL.glEnable(GL.GL_DEPTH_TEST)
@@ -316,13 +280,15 @@ def skinning(gltf_path, width, height):
     )
 
     # construimos las dos pipelines
-    lbs_pipeline = load_pipeline(
+    lbs_pipeline = load_skinning_pipeline(
         Path(__file__).parent / "vertex_program_lbs.glsl",
         Path(__file__).parent / "fragment_program.glsl",
+        n_joints,
     )
-    dqs_pipeline = load_pipeline(
+    dqs_pipeline = load_skinning_pipeline(
         Path(__file__).parent / "vertex_program_dqs.glsl",
         Path(__file__).parent / "fragment_program.glsl",
+        n_joints,
     )
 
     # el grafo de escena gestiona la jerarquia de nodos (incluidos los
@@ -349,6 +315,31 @@ def skinning(gltf_path, width, height):
     n_triangles_total = sum(p["indices"].shape[0] // 3 for p in primitives_data)
     print(f"[skinning] primitivas={len(primitives_data)} vertices={n_vertices_total} triangulos={n_triangles_total}")
 
+    # Algunos exports (los de FBX2glTF, por ejemplo) dejan una escala uniforme s
+    # en las matrices de skinning, incluso en reposo. LBS la aplica sin problema,
+    # pero un cuaternion dual solo guarda rotacion y traslacion, de modo que DQS
+    # dibujaria el modelo s veces mas chico. Si s es la misma en todos los huesos,
+    # se pasa a la malla: posiciones por s e inverse bind matrices por diag(1/s).
+    # El producto de la matriz de skinning por la posicion no cambia, y las
+    # matrices de skinning quedan rigidas
+    rest_skin_matrices, _, _ = compute_skin_matrices(model, graph, node_to_scenegraph_name)
+    joint_scales = np.cbrt(np.abs(np.linalg.det(rest_skin_matrices[:, :3, :3])))
+    skin_scale = float(np.median(joint_scales))
+    if abs(skin_scale - 1.0) > 1e-3:
+        if np.ptp(joint_scales) > 1e-3 * skin_scale:
+            print(
+                f"[skinning] aviso: las matrices de skinning traen escalas distintas por hueso "
+                f"({joint_scales.min():.3f} a {joint_scales.max():.3f}) y DQS no las representa"
+            )
+        else:
+            for prim in primitives_data:
+                prim["positions"] *= skin_scale
+            mesh_skin = model.skins[mesh_skin_index]
+            mesh_skin.inverse_bind_matrices = mesh_skin.inverse_bind_matrices @ np.diag(
+                [1.0 / skin_scale, 1.0 / skin_scale, 1.0 / skin_scale, 1.0]
+            ).astype(np.float32)
+            print(f"[skinning] escala {skin_scale:.3f} de las matrices de skinning pasada a la malla")
+
     assets_dir = Path(__file__).parent.parent.parent / "assets"
     texture_cache_by_filename = {}
 
@@ -371,7 +362,9 @@ def skinning(gltf_path, width, height):
         print(f"[skinning] textura cargada: {filename} ({image.mode}, {image.size[0]}x{image.size[1]})")
         return texture_id
 
-    model.upload_textures()
+    # Blender y los modelos de muestra de Khronos siguen la especificacion: V = 0
+    # es la fila de arriba de la imagen, asi que la textura se sube sin invertir
+    model.upload_textures(flip_top_bottom=False)
     white_pixel_texture = texture_2D_setup(Image.new("RGB", (1, 1), color=(255, 255, 255)))
 
     for prim in primitives_data:
@@ -385,6 +378,9 @@ def skinning(gltf_path, width, height):
         if texture_id is None:
             texture_id = white_pixel_texture
         prim["texture_id"] = texture_id
+        prim["base_color"] = (
+            material["base_color_factor"][:3] if material is not None else np.ones(3, dtype=np.float32)
+        )
         # las alas usan plumas.png con alpha. Usamos blending para los
         # bordes suaves de las plumas + un discard chico para evitar
         # escribir al depth buffer pixeles invisibles. Las primitivas
@@ -450,8 +446,12 @@ def skinning(gltf_path, width, height):
     if diagonal <= 0:
         diagonal = 1.0
 
-    camera_offset = np.array([diagonal * 0.7, diagonal * 0.3, diagonal * 0.8], dtype=np.float32)
-    initial_eye = center + camera_offset
+    # la camara queda a la distancia en que la esfera que envuelve al modelo en
+    # reposo cabe en el campo de vision vertical de 45 grados
+    camera_direction = np.array([0.7, 0.3, 0.8], dtype=np.float32)
+    camera_direction /= np.linalg.norm(camera_direction)
+    camera_distance = 0.5 * diagonal / np.sin(np.radians(45.0 / 2.0))
+    initial_eye = center + camera_direction * camera_distance
     initial_view = tr.lookAt(initial_eye, center.astype(np.float32), np.array([0.0, 1.0, 0.0]))
 
     arcball = Arcball(
@@ -463,15 +463,14 @@ def skinning(gltf_path, width, height):
     arcball.set_initial_state()
     arcball.set_distance_limits(min_distance=diagonal * 0.2, max_distance=diagonal * 6.0)
 
-    projection = tr.perspective(45.0, width / height, max(diagonal * 0.01, 0.05), diagonal * 10.0)
+    projection = tr.perspective(45.0, width / height, diagonal * 0.01, diagonal * 10.0)
 
     light_direction = np.array([0.4, 0.7, 0.5], dtype=np.float32)
     ambient_strength = 0.35
-    base_color_factor = np.array([1.0, 1.0, 1.0], dtype=np.float32)
 
     # pyglet exige que las assignaciones a uniformes-array tengan tipo ctypes
     # con la forma exacta. Pre-alocamos los buffers una vez y los rellenamos
-    # via vista numpy en cada frame para evitar la conversion de 91 sub-arrays
+    # via vista numpy en cada frame para evitar convertir un sub-array por hueso
     Mat4Array = (GLfloat * 16) * n_joints
     Vec4Array = (GLfloat * 4) * n_joints
     skin_matrices_buffer = Mat4Array()
@@ -499,33 +498,35 @@ def skinning(gltf_path, width, height):
         "paused": False,
         "method": "LBS",
         "show_skeleton": False,
+        "animation": animation_index,
+        "joint_nodes": joint_nodes,
     }
 
     def apply_animation_to_graph():
         if not model.animations:
             return
-        overrides = model.sample_animation(0, state["time"])
-        for src_node_index, trs in overrides.items():
-            target_index = animation_remap.get(src_node_index, src_node_index)
-            translation = trs.get("translation", model.nodes[target_index].translation)
-            rotation = trs.get("rotation", model.nodes[target_index].rotation)
-            scale = trs.get("scale", model.nodes[target_index].scale)
-            graph.nodes[node_to_scenegraph_name[target_index]]["transform"] = _compose_trs(
+        overrides = model.sample_animation(state["animation"], state["time"])
+        for node_index, trs in overrides.items():
+            translation = trs.get("translation", model.nodes[node_index].translation)
+            rotation = trs.get("rotation", model.nodes[node_index].rotation)
+            scale = trs.get("scale", model.nodes[node_index].scale)
+            graph.nodes[node_to_scenegraph_name[node_index]]["transform"] = _compose_trs(
                 translation, rotation, scale
             )
 
     def update_labels():
         label_method.text = f"metodo: {state['method']}"
         if model.animations:
-            duration = model.animations[0]["duration"]
+            animation = model.animations[state["animation"]]
+            duration = animation["duration"]
             label_time.text = (
-                f"t = {state['time']:5.2f} / {duration:5.2f} s   "
+                f"{animation['name']}   t = {state['time']:5.2f} / {duration:5.2f} s   "
                 f"{'[pausa]' if state['paused'] else '[play] '}"
                 f"   esqueleto: {'on' if state['show_skeleton'] else 'off'}"
             )
         else:
             label_time.text = f"sin animacion   esqueleto: {'on' if state['show_skeleton'] else 'off'}"
-        label_help.text = "m LBS/DQS  e esqueleto  espacio pausa  , . scrub  r reset  mouse rotar/pan/zoom"
+        label_help.text = "m LBS/DQS  e esqueleto  a animacion  espacio pausa  , . scrub  r reset  mouse rotar/pan/zoom"
 
     apply_animation_to_graph()
     update_labels()
@@ -537,7 +538,7 @@ def skinning(gltf_path, width, height):
         view = np.linalg.inv(arcball.pose)
 
         skin_matrices, real_quats, dual_quats = compute_skin_matrices(
-            model, graph, node_to_scenegraph_name
+            model, graph, node_to_scenegraph_name, state["joint_nodes"]
         )
 
         if state["method"] == "LBS":
@@ -552,7 +553,6 @@ def skinning(gltf_path, width, height):
         pipeline["projection"] = projection.reshape(16, 1, order="F")
         pipeline["transform"] = tr.identity().reshape(16, 1, order="F")
         pipeline["light_direction"] = light_direction.reshape(3, 1, order="F")
-        pipeline["base_color_factor"] = base_color_factor.reshape(3, 1, order="F")
         pipeline["ambient_strength"] = ambient_strength
 
         if state["method"] == "LBS":
@@ -578,6 +578,7 @@ def skinning(gltf_path, width, height):
             GL.glActiveTexture(GL.GL_TEXTURE0)
             GL.glBindTexture(GL.GL_TEXTURE_2D, prim["texture_id"])
             pipeline["alpha_cutoff"] = prim["alpha_cutoff"]
+            pipeline["base_color_factor"] = prim["base_color"].reshape(3, 1, order="F")
             prim[vertex_list_key].draw(GL.GL_TRIANGLES)
         GL.glDepthMask(GL.GL_TRUE)
 
@@ -586,9 +587,11 @@ def skinning(gltf_path, width, height):
             # hijo, leidas del transform global actualizado. Apagamos depth
             # test para que el esqueleto sea visible aunque este dentro de
             # la malla, asi se ve como un rayos X pedagogico
+            # cada joint se dibuja donde lo deja el nodo que mueve la animacion
+            source = dict(zip(model.skins[mesh_skin_index].joints, state["joint_nodes"]))
             for edge_index, (parent_node_index, child_node_index) in enumerate(skeleton_edges):
-                parent_pos = graph.global_transforms[node_to_scenegraph_name[parent_node_index]][:3, 3]
-                child_pos = graph.global_transforms[node_to_scenegraph_name[child_node_index]][:3, 3]
+                parent_pos = graph.global_transforms[node_to_scenegraph_name[source[parent_node_index]]][:3, 3]
+                child_pos = graph.global_transforms[node_to_scenegraph_name[source[child_node_index]]][:3, 3]
                 skeleton_positions_buffer[2 * edge_index] = parent_pos
                 skeleton_positions_buffer[2 * edge_index + 1] = child_pos
             skeleton_gpu.position[:] = skeleton_positions_buffer.flatten()
@@ -614,6 +617,14 @@ def skinning(gltf_path, width, height):
             print(f"[skinning] metodo: {state['method']}")
         elif symbol == pyglet.window.key.E:
             state["show_skeleton"] = not state["show_skeleton"]
+        elif symbol == pyglet.window.key.A and model.animations:
+            # los nodos que la animacion nueva no mueve vuelven a su pose del archivo
+            state["animation"] = (state["animation"] + 1) % len(model.animations)
+            state["joint_nodes"] = animated_joint_nodes(model, state["animation"])
+            state["time"] = 0.0
+            for node in model.nodes:
+                graph.nodes[node_to_scenegraph_name[node.index]]["transform"] = node.local_matrix()
+            apply_animation_to_graph()
         elif symbol == pyglet.window.key.SPACE:
             state["paused"] = not state["paused"]
         elif symbol == pyglet.window.key.R:
@@ -626,7 +637,7 @@ def skinning(gltf_path, width, height):
         elif symbol == pyglet.window.key.PERIOD:
             state["paused"] = True
             if model.animations:
-                duration = model.animations[0]["duration"]
+                duration = model.animations[state["animation"]]["duration"]
                 state["time"] = min(duration, state["time"] + 0.05)
             apply_animation_to_graph()
         update_labels()
@@ -657,7 +668,7 @@ def skinning(gltf_path, width, height):
         if not model.animations or state["paused"]:
             return
         state["time"] += dt
-        duration = model.animations[0]["duration"]
+        duration = model.animations[state["animation"]]["duration"]
         if duration > 0.0:
             state["time"] = state["time"] % duration
         apply_animation_to_graph()

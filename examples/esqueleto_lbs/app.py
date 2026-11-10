@@ -19,9 +19,18 @@ El color de la malla mezcla un color por hueso con los mismos pesos del
 skinning, de modo que se ve que hueso domina cada region y como las bandas de
 mezcla se doblan junto al esqueleto.
 
+El hueso 1 tambien puede girar en torno a su propio eje, como un antebrazo que
+se tuerce. Con LBS la mezcla de las dos matrices encoge la articulacion: a 180
+grados el tubo se cierra (el defecto candy-wrapper). La tecla m cambia a Dual
+Quaternion Skinning (vertex_program_dqs.glsl), que mezcla los huesos como
+cuaterniones duales y conserva el radio. Las franjas oscuras a lo largo del
+tubo dejan ver el giro.
+
 Teclas:
     a / z     rota el hueso 1 (articulacion media)    - / +
     s / x     rota el hueso 2 (articulacion superior)  - / +
+    d / f     gira el hueso 1 en torno a su eje         - / +
+    m         alterna LBS / DQS
     w         alterna malla rellena / wireframe
     c         muestra/oculta volumenes de colision (OBB por hueso vs AABB global)
     r         vuelve a la pose de reposo
@@ -38,6 +47,8 @@ from pyglet.gl import GLfloat
 import grafica.transformations as tr
 from grafica.ui import InfoPanel, ui_overlay
 from grafica.utils import load_pipeline
+
+from .cuaterniones_duales import aplicar_dqs, skin_matrix_to_dual_quaternion
 
 
 # Alturas de las tres articulaciones a lo largo del tubo (en reposo). El tubo
@@ -69,18 +80,25 @@ COLORES_HUESO = np.array(
 
 PASO_ANGULO = np.radians(9.0)
 ANGULO_MAXIMO = np.radians(120.0)
+PASO_TORSION = np.radians(15.0)
+TORSION_MAXIMA = np.radians(180.0)
+
+# Franjas oscuras a lo largo del tubo: los segmentos del anillo cuyo indice cae
+# en estas posiciones de cada grupo de seis (cuatro franjas en 24 segmentos).
+FRANJAS_POR_GRUPO = (0, 1)
 
 
-def poses_globales(angulo_hueso_1, angulo_hueso_2):
+def poses_globales(angulo_hueso_1, angulo_hueso_2, torsion_hueso_1=0.0):
     """
     Poses globales de los tres huesos por cinematica directa. El hueso 0 es la
     raiz fija; cada hijo compone la traslacion a su articulacion con la rotacion
-    local sobre el eje Z. Con ambos angulos en cero se recupera la pose de
-    reposo (los huesos quedan alineados en el eje Y).
+    local sobre el eje Z. El hueso 1 ademas puede girar sobre su propio eje (Y
+    local), y el hueso 2 hereda ese giro. Con todos los angulos en cero se
+    recupera la pose de reposo (los huesos quedan alineados en el eje Y).
     """
     salto = ALTURA_JUNTAS[1] - ALTURA_JUNTAS[0]
     m0 = tr.identity()
-    m1 = m0 @ tr.translate(0.0, salto, 0.0) @ tr.rotationZ(angulo_hueso_1)
+    m1 = m0 @ tr.translate(0.0, salto, 0.0) @ tr.rotationZ(angulo_hueso_1) @ tr.rotationY(torsion_hueso_1)
     m2 = m1 @ tr.translate(0.0, salto, 0.0) @ tr.rotationZ(angulo_hueso_2)
     return [m0, m1, m2]
 
@@ -91,9 +109,9 @@ POSES_REPOSO = poses_globales(0.0, 0.0)
 INVERSE_BIND = [np.linalg.inv(m) for m in POSES_REPOSO]
 
 
-def matrices_de_skinning(angulo_hueso_1, angulo_hueso_2):
+def matrices_de_skinning(angulo_hueso_1, angulo_hueso_2, torsion_hueso_1=0.0):
     """Una matriz por hueso: pose global actual por su inverse bind."""
-    globales = poses_globales(angulo_hueso_1, angulo_hueso_2)
+    globales = poses_globales(angulo_hueso_1, angulo_hueso_2, torsion_hueso_1)
     return [globales[j] @ INVERSE_BIND[j] for j in range(3)], globales
 
 
@@ -158,8 +176,8 @@ def _influencias_por_altura(altura):
 def construir_tubo(n_anillos=49, n_segmentos=24):
     """
     Genera un tubo de triangulos alrededor del eje Y. Devuelve posiciones,
-    normales (radiales), influencias de hueso, pesos e indices. Cada vertice
-    obtiene sus pesos de skinning segun su altura.
+    normales (radiales), influencias de hueso, pesos, franjas e indices. Cada
+    vertice obtiene sus pesos de skinning segun su altura.
     """
     alturas = np.linspace(0.0, ALTURA_TUBO, n_anillos)
     angulos = np.linspace(0.0, 2.0 * np.pi, n_segmentos, endpoint=False)
@@ -168,14 +186,16 @@ def construir_tubo(n_anillos=49, n_segmentos=24):
     normales = []
     juntas = []
     pesos = []
+    franjas = []
     for altura in alturas:
         indices_junta, pesos_junta = _influencias_por_altura(altura)
-        for angulo in angulos:
+        for segmento, angulo in enumerate(angulos):
             direccion = np.array([np.cos(angulo), 0.0, np.sin(angulo)], dtype=np.float32)
             posiciones.append([RADIO_TUBO * direccion[0], altura, RADIO_TUBO * direccion[2]])
             normales.append(direccion)
             juntas.append(indices_junta)
             pesos.append(pesos_junta)
+            franjas.append(1.0 if segmento % 6 in FRANJAS_POR_GRUPO else 0.0)
 
     indices = []
     for anillo in range(n_anillos - 1):
@@ -192,6 +212,7 @@ def construir_tubo(n_anillos=49, n_segmentos=24):
         np.array(normales, dtype=np.float32),
         np.array(juntas, dtype=np.float32),
         np.array(pesos, dtype=np.float32),
+        np.array(franjas, dtype=np.float32),
         np.array(indices, dtype=np.uint32),
     )
 
@@ -204,7 +225,7 @@ def esqueleto_lbs(width, height):
 
     GL.glClearColor(0.09, 0.10, 0.13, 1.0)
 
-    posiciones, normales, juntas, pesos, indices = construir_tubo()
+    posiciones, normales, juntas, pesos, franjas, indices = construir_tubo()
     print(
         f"[esqueleto_lbs] tubo: vertices={len(posiciones)} triangulos={len(indices) // 3} "
         f"huesos={len(ALTURA_JUNTAS)}"
@@ -214,11 +235,20 @@ def esqueleto_lbs(width, height):
         Path(__file__).parent / "vertex_program.glsl",
         Path(__file__).parent / "fragment_program.glsl",
     )
-    malla = pipeline.vertex_list_indexed(len(posiciones), GL.GL_TRIANGLES, indices.tolist())
-    malla.position[:] = posiciones.flatten()
-    malla.normal[:] = normales.flatten()
-    malla.joints[:] = juntas.flatten()
-    malla.weights[:] = pesos.flatten()
+    # la misma malla, con los mismos atributos, para cada metodo de skinning
+    pipeline_dqs = load_pipeline(
+        Path(__file__).parent / "vertex_program_dqs.glsl",
+        Path(__file__).parent / "fragment_program.glsl",
+    )
+    mallas = {}
+    for metodo, programa in (("LBS", pipeline), ("DQS", pipeline_dqs)):
+        malla = programa.vertex_list_indexed(len(posiciones), GL.GL_TRIANGLES, indices.tolist())
+        malla.position[:] = posiciones.flatten()
+        malla.normal[:] = normales.flatten()
+        malla.joints[:] = juntas.flatten()
+        malla.weights[:] = pesos.flatten()
+        malla.franja[:] = franjas
+        mallas[metodo] = (programa, malla)
 
     # esqueleto: tres segmentos de hueso (lineas) y tres articulaciones
     # (puntos). El ultimo segmento va de la articulacion 2 a la punta del tubo,
@@ -280,18 +310,29 @@ def esqueleto_lbs(width, height):
     joint_colors_buffer = Vec3Array()
     np.frombuffer(joint_colors_buffer, dtype=np.float32).reshape(3, 3)[:] = COLORES_HUESO
 
+    # DQS: un cuaternion unitario (rotacion) y uno dual (traslacion) por hueso
+    Vec4Array = (GLfloat * 4) * 3
+    real_buffer = Vec4Array()
+    dual_buffer = Vec4Array()
+    real_view = np.frombuffer(real_buffer, dtype=np.float32).reshape(3, 4)
+    dual_view = np.frombuffer(dual_buffer, dtype=np.float32).reshape(3, 4)
+
     panel = (
         InfoPanel(x=14, y_top=height - 26, background=(18, 18, 22))
         .add("hueso1")
         .add("hueso2")
+        .add("torsion")
+        .add("metodo")
         .add("modo")
         .add("colision")
-        .footer("a z hueso 1   s x hueso 2   w wireframe   c colisiones   r reposo")
+        .footer("a z hueso 1   s x hueso 2   d f torsion   m LBS/DQS   w wireframe   c colisiones   r reposo")
     )
 
     state = {
         "angulo_hueso_1": 0.0,
         "angulo_hueso_2": 0.0,
+        "torsion_hueso_1": 0.0,
+        "metodo": "LBS",
         "wireframe": False,
         "obb": False,
     }
@@ -307,15 +348,19 @@ def esqueleto_lbs(width, height):
             lineas.append(_lineas_caja(esquinas_mundo))
 
         # AABB de toda la malla deformada: hay que re-skinnear los vertices en la
-        # CPU y tomar el min/max en mundo cada cuadro. Se infla al doblar.
-        homogeneo = np.hstack([posiciones, np.ones((len(posiciones), 1), dtype=np.float32)])
-        matrices = np.stack(skin_matrices)
-        deformadas = np.zeros((len(posiciones), 3), dtype=np.float32)
-        for influencia in range(2):  # solo las dos influencias con peso > 0
-            indices = juntas[:, influencia].astype(int)
-            peso = pesos[:, influencia][:, None]
-            aporte = np.einsum("nij,nj->ni", matrices[indices], homogeneo)[:, :3]
-            deformadas += (peso * aporte).astype(np.float32)
+        # CPU, con el mismo metodo del shader, y tomar el min/max en mundo cada
+        # cuadro. Se infla al doblar.
+        if state["metodo"] == "DQS":
+            deformadas = aplicar_dqs(posiciones, juntas, pesos, real_view, dual_view)
+        else:
+            homogeneo = np.hstack([posiciones, np.ones((len(posiciones), 1), dtype=np.float32)])
+            matrices = np.stack(skin_matrices)
+            deformadas = np.zeros((len(posiciones), 3), dtype=np.float32)
+            for influencia in range(2):  # solo las dos influencias con peso > 0
+                indices = juntas[:, influencia].astype(int)
+                peso = pesos[:, influencia][:, None]
+                aporte = np.einsum("nij,nj->ni", matrices[indices], homogeneo)[:, :3]
+                deformadas += (peso * aporte).astype(np.float32)
         esquinas = _esquinas_caja(deformadas.min(axis=0), deformadas.max(axis=0))
         lineas.append(_lineas_caja(esquinas))
 
@@ -323,10 +368,12 @@ def esqueleto_lbs(width, height):
 
     def apply_state():
         skin_matrices, globales = matrices_de_skinning(
-            state["angulo_hueso_1"], state["angulo_hueso_2"]
+            state["angulo_hueso_1"], state["angulo_hueso_2"], state["torsion_hueso_1"]
         )
         # column-major para glUniformMatrix4fv (transpose = GL_FALSE)
         skin_view[:] = np.array(skin_matrices, dtype=np.float32).transpose(0, 2, 1).reshape(3, 16)
+        for j, matriz in enumerate(skin_matrices):
+            real_view[j], dual_view[j] = skin_matrix_to_dual_quaternion(matriz)
 
         # posiciones de las articulaciones desde la pose global de cada hueso
         origenes = np.array([m[:3, 3] for m in globales], dtype=np.float32)
@@ -345,6 +392,8 @@ def esqueleto_lbs(width, height):
 
         panel["hueso1"] = f"hueso 1 (medio):    {np.degrees(state['angulo_hueso_1']):6.1f} deg"
         panel["hueso2"] = f"hueso 2 (superior): {np.degrees(state['angulo_hueso_2']):6.1f} deg"
+        panel["torsion"] = f"giro del hueso 1:   {np.degrees(state['torsion_hueso_1']):6.1f} deg"
+        panel["metodo"] = f"skinning: {state['metodo']}"
         panel["modo"] = f"malla:   {'wireframe' if state['wireframe'] else 'relleno'}"
         panel["colision"] = (
             "colision: OBB por hueso vs AABB global" if state["obb"] else "colision: off (c)"
@@ -352,6 +401,7 @@ def esqueleto_lbs(width, height):
         print(
             f"[esqueleto_lbs] hueso1={np.degrees(state['angulo_hueso_1']):.1f} "
             f"hueso2={np.degrees(state['angulo_hueso_2']):.1f} "
+            f"torsion={np.degrees(state['torsion_hueso_1']):.1f} metodo={state['metodo']} "
             f"wireframe={state['wireframe']} obb={state['obb']}"
         )
 
@@ -362,13 +412,18 @@ def esqueleto_lbs(width, height):
         GL.glEnable(GL.GL_DEPTH_TEST)
         window.clear()
 
-        pipeline.use()
-        pipeline["view"] = view.reshape(16, 1, order="F")
-        pipeline["projection"] = projection.reshape(16, 1, order="F")
-        pipeline["light_direction"] = light_direction.reshape(3, 1, order="F")
-        pipeline["ambient_strength"] = ambient_strength
-        pipeline["skin_matrices"] = skin_buffer
-        pipeline["joint_colors"] = joint_colors_buffer
+        programa, malla = mallas[state["metodo"]]
+        programa.use()
+        programa["view"] = view.reshape(16, 1, order="F")
+        programa["projection"] = projection.reshape(16, 1, order="F")
+        programa["light_direction"] = light_direction.reshape(3, 1, order="F")
+        programa["ambient_strength"] = ambient_strength
+        programa["joint_colors"] = joint_colors_buffer
+        if state["metodo"] == "DQS":
+            programa["dual_quat_real"] = real_buffer
+            programa["dual_quat_dual"] = dual_buffer
+        else:
+            programa["skin_matrices"] = skin_buffer
         # el modo wireframe solo afecta a los poligonos (el tubo). Lo dejamos
         # en relleno enseguida para que el esqueleto (lineas y puntos) y el
         # panel 2D, que es geometria rellena, no salgan tambien como aristas
@@ -408,6 +463,15 @@ def esqueleto_lbs(width, height):
         elif symbol == pyglet.window.key.X:
             state["angulo_hueso_2"] = min(ANGULO_MAXIMO, state["angulo_hueso_2"] + PASO_ANGULO)
             apply_state()
+        elif symbol == pyglet.window.key.D:
+            state["torsion_hueso_1"] = max(-TORSION_MAXIMA, state["torsion_hueso_1"] - PASO_TORSION)
+            apply_state()
+        elif symbol == pyglet.window.key.F:
+            state["torsion_hueso_1"] = min(TORSION_MAXIMA, state["torsion_hueso_1"] + PASO_TORSION)
+            apply_state()
+        elif symbol == pyglet.window.key.M:
+            state["metodo"] = "DQS" if state["metodo"] == "LBS" else "LBS"
+            apply_state()
         elif symbol == pyglet.window.key.W:
             state["wireframe"] = not state["wireframe"]
             apply_state()
@@ -417,6 +481,7 @@ def esqueleto_lbs(width, height):
         elif symbol == pyglet.window.key.R:
             state["angulo_hueso_1"] = 0.0
             state["angulo_hueso_2"] = 0.0
+            state["torsion_hueso_1"] = 0.0
             apply_state()
 
     pyglet.app.run()

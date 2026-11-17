@@ -251,5 +251,9 @@ registrar(
     suggestive_contours,
 )
 
+from examples.microjuegos.app import microjuegos
+
+registrar("Tarea 3", microjuegos)
+
 if __name__ == "__main__":
     grafica_cli()

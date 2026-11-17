@@ -9,3 +9,6 @@ CLAUDE.md
 
 # datos generados por los ejemplos (por ejemplo, los TAM de lapped_hatching)
 cache/
+
+# microjuegos de los estudiantes (tarea 3): solo se versiona el README
+microjuegos/*/

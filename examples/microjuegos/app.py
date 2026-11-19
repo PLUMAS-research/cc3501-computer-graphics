@@ -79,7 +79,8 @@ void main()
 
 # se usan cuando ninguna contribución cubre ese rol, o cuando todas fallaron
 EJEMPLOS = {
-    "microjuego": ["examples.microjuegos.esquiva", "examples.microjuegos.suelta"],
+    "microjuego": ["examples.microjuegos.esquiva", "examples.microjuegos.suelta", "examples.microjuegos.despierta",
+                   "examples.microjuegos.reacciona", "examples.microjuegos.piruetas"],
     "interludio": ["examples.microjuegos.interludio_simple"],
     "transicion": ["examples.microjuegos.giro"],
 }
